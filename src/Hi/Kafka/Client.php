@@ -25,8 +25,12 @@ if (! \class_exists(Client::class, false)) {
      *
      * 仅当 hi-kafka 扩展未加载时本桩生效；调用任何方法都是 no-op。
      * 真实运行时实现在 ext 端，签名以本文件为准（IDE / 静态分析 / docblock）。
+     *
+     * 真扩展端通过 `#[implements(crate::client_interface::get_ce())]` 让
+     * 本类 implements `Hi\Kafka\ClientInterface`；桩这里同步声明，保证
+     * IDE / PHPStan 看到统一的接口关系。
      */
-    final class Client
+    final class Client implements ClientInterface
     {
         /**
          * @param string|null $socket UDS 路径；null = `/tmp/hi-kafka.sock` 或 `HI_KAFKA_SOCKET` env

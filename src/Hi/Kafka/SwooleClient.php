@@ -32,7 +32,7 @@ use Swoole\Coroutine\Socket;
  * });
  * ```
  */
-final class SwooleClient
+final class SwooleClient implements ClientInterface
 {
     private const SOCK_STREAM = 1;
     private const AF_UNIX = 1;

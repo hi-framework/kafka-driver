@@ -33,7 +33,7 @@ use Swow\SocketException;
  * });
  * ```
  */
-final class SwowClient
+final class SwowClient implements ClientInterface
 {
     // 注：刻意不写 `private const TYPE_UNIX = Socket::TYPE_UNIX;` ——
     // 那会让 SwowClient 类本身被解析时即触发 Swow\Socket 加载。
