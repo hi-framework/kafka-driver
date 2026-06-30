@@ -57,15 +57,29 @@ final class SwooleClient implements ClientInterface
         $this->errorFrameKind = hi_kafka_error_frame_kind();
     }
 
-    public function __destruct()
+    /**
+     * 优雅关闭 idle 连接池。框架容器 `#[Finalize]` 在 worker shutdown 时于协程
+     * 上下文调用（经 `KafkaManager::finalize`）；也被 `__destruct` 兜底。
+     *
+     * 非协程上下文直接返回——Swoole `Channel->pop` 必须在协程内，否则抛
+     * "API must be called in the coroutine" fatal。idle 连接随进程退出由 OS 回收。
+     */
+    public function close(): void
     {
-        // 关闭所有 idle 连接
+        if (\Swoole\Coroutine::getCid() < 0) {
+            return;
+        }
         while (! $this->idleConns->isEmpty()) {
             $conn = $this->idleConns->pop(0.001);
             if ($conn instanceof Socket) {
                 $conn->close();
             }
         }
+    }
+
+    public function __destruct()
+    {
+        $this->close();
     }
 
     /**
@@ -243,7 +257,13 @@ final class SwooleClient implements ClientInterface
         if (! $resp['ok']) {
             throw new \RuntimeException("subscribe failed: {$resp['message']}");
         }
-        return $resp['subscription_id'];
+        $id = $resp['subscription_id'];
+        // 登记订阅 → 进程退出(MSHUTDOWN)时扩展主动 unsubscribe + Goodbye，让 worker 亚秒自退。
+        // 协程 driver 订阅不进 Rust 注册表，不登记则消费者进程退出后 worker 要干等 idle 超时。
+        if (\function_exists('hi_kafka_track_subscription')) {
+            hi_kafka_track_subscription($id, $this->socket);
+        }
+        return $id;
     }
 
     /**
@@ -279,6 +299,10 @@ final class SwooleClient implements ClientInterface
      */
     public function unsubscribe(int $subscriptionId): void
     {
+        // 注销订阅登记，避免 MSHUTDOWN 重复 unsubscribe 已退订的订阅。
+        if (\function_exists('hi_kafka_untrack_subscription')) {
+            hi_kafka_untrack_subscription($subscriptionId, $this->socket);
+        }
         $frame = hi_kafka_encode_unsubscribe_frame($subscriptionId);
         $conn = $this->acquire();
         try {

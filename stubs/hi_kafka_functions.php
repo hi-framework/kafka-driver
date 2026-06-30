@@ -138,6 +138,20 @@ namespace {
         }
     }
 
+    if (! \function_exists('hi_kafka_track_subscription')) {
+        /** @internal 协程 driver 登记订阅，供进程退出时主动 unsubscribe + Goodbye */
+        function hi_kafka_track_subscription(int $subscriptionId, ?string $socket = null): void
+        {
+        }
+    }
+
+    if (! \function_exists('hi_kafka_untrack_subscription')) {
+        /** @internal 与 hi_kafka_track_subscription 配对，driver 主动 unsubscribe 后注销 */
+        function hi_kafka_untrack_subscription(int $subscriptionId, ?string $socket = null): void
+        {
+        }
+    }
+
     if (! \function_exists('hi_kafka_pool_stats')) {
         /**
          * @return array<string, array{
