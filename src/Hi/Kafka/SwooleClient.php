@@ -40,6 +40,7 @@ final class SwooleClient implements ClientInterface
     private Channel $idleConns;
     private int $created = 0;
     private bool $workerEnsured = false;
+    private int $errorFrameKind = 0;
 
     /**
      * @param string $socket     Worker UDS 路径
@@ -53,6 +54,7 @@ final class SwooleClient implements ClientInterface
     ) {
         $this->idleConns = new Channel($maxIdle);
         $this->assertExtension();
+        $this->errorFrameKind = hi_kafka_error_frame_kind();
     }
 
     public function __destruct()
@@ -83,16 +85,45 @@ final class SwooleClient implements ClientInterface
         ?int $timestampMs = null,
     ): void {
         $frame = hi_kafka_encode_fnf_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
+        $timeoutSec = 5.0;
         $conn = $this->acquire();
         try {
-            $sent = $conn->sendAll($frame);
+            $sent = $conn->sendAll($frame, $timeoutSec);
             if ($sent === false || $sent < strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
                     'sendAll failed: ' . ($conn->errMsg ?: 'short write')
                 );
             }
+            // FNF 分层：读 worker 本地 enqueue ack。cluster 不存在 / 队列满等同步可知
+            // 错误会以 Error 帧回来 → KafkaException；不等 broker delivery。
+            $headerLen = hi_kafka_header_len();
+            $header = $conn->recvAll($headerLen, $timeoutSec);
+            if ($header === false || strlen($header) < $headerLen) {
+                $conn->close();
+                throw new \RuntimeException(
+                    'recvAll fnf ack header failed: ' . ($conn->errMsg ?: 'short read')
+                );
+            }
+            $parsed = hi_kafka_parse_header($header);
+            $payloadLen = $parsed['payload_len'];
+            $payload = $payloadLen > 0
+                ? $conn->recvAll($payloadLen, $timeoutSec)
+                : '';
+            if ($payloadLen > 0 && (
+                $payload === false || strlen($payload) < $payloadLen
+            )) {
+                $conn->close();
+                throw new \RuntimeException(
+                    'recvAll fnf ack payload failed: ' . ($conn->errMsg ?: 'short read')
+                );
+            }
             $this->release($conn);
+            if ($parsed['kind'] === $this->errorFrameKind) {
+                throw $this->makeKafka($header, $payload);
+            }
+        } catch (\Hi\Kafka\KafkaException $ke) {
+            throw $ke; // 连接已归还，业务错误不污染连接池
         } catch (\Throwable $e) {
             $conn->close();
             throw $e;
@@ -168,7 +199,12 @@ final class SwooleClient implements ClientInterface
             }
 
             $this->release($conn);
+            if ($parsed['kind'] === $this->errorFrameKind) {
+                throw $this->makeKafka($header, $payload);
+            }
             return hi_kafka_decode_resp_frame($header . $payload);
+        } catch (\Hi\Kafka\KafkaException $ke) {
+            throw $ke;
         } catch (\Throwable $e) {
             $conn->close();
             throw $e;
@@ -485,11 +521,32 @@ final class SwooleClient implements ClientInterface
             }
 
             $this->release($conn);
+            if ($parsed['kind'] === $this->errorFrameKind) {
+                throw $this->makeKafka($header, $payload);
+            }
             return hi_kafka_decode_consumer_resp($header . $payload);
+        } catch (\Hi\Kafka\KafkaException $ke) {
+            throw $ke;
         } catch (\Throwable $e) {
             $conn->close();
             throw $e;
         }
+    }
+
+    /**
+     * 把 worker 回的 Error 帧解码成 KafkaException（不抛，由调用方 throw）。
+     */
+    private function makeKafka(string $header, string $payload): \Hi\Kafka\KafkaException
+    {
+        $err = hi_kafka_decode_error_frame($header . $payload);
+
+        return new \Hi\Kafka\KafkaException(
+            (string) $err['message'],
+            (int) $err['kind'],
+            (string) $err['kind_name'],
+            (bool) $err['retryable'],
+            (int) $err['native_code'],
+        );
     }
 
     private function acquire(): Socket
