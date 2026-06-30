@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace Hi\Kafka;
 
 /*
- * `Hi\Kafka\KafkaException` 由 hi-kafka 扩展 MINIT 阶段以 `#[php_class] extends \Exception`
- * 注册（带 getKind/getKindName/isRetryable/getNativeCode）。本文件是仅在扩展缺失时
- * 才会被 PSR-4 autoload 触发的同名桩——给 IDE / 静态分析 / 无扩展 CI 兜底。
+ * `Hi\Kafka\KafkaException` 由 hi-kafka 扩展 MINIT 阶段以 `ClassBuilder extends \Exception`
+ * 注册（手动注册而非 `#[php_class]`——后者会覆盖 `\Exception` 的 `create_object`，导致
+ * **堆栈/文件/行号丢失**；详见 `ext/src/kafka_exception.rs`）。带公开属性
+ * `kind`/`kind_name`/`retryable`/`native_code` 与 getter `getKind`/`getKindName`/
+ * `isRetryable`/`getNativeCode`。本文件是仅在扩展缺失时才被 PSR-4 autoload 触发的同名
+ * 桩——给 IDE / 静态分析 / 无扩展 CI 兜底，**形态必须与扩展端一致**，否则装/不装扩展时
+ * API 漂移。
  *
  * `class_exists(..., false)` 关掉 autoload 探测自身，避免回环：
  * - 扩展存在 → MINIT 已注册同名类 → guard 命中 → 不重复定义
  * - 扩展缺失 → autoload 触发 → guard 不命中 → 落桩
  *
- * 构造签名必须与扩展端一致：`new KafkaException($message, $kind, $kindName, $retryable, $nativeCode)`。
+ * 构造与扩展端一致：沿用（继承的）`\Exception::__construct($message, $code = kind)`（2 参）；
+ * 分类信息由抛出方（worker 错误帧 → `ipc_err_to_php` / 协程 driver `makeKafka`）构造后写入。
  */
 
 if (! \class_exists(KafkaException::class, false)) {
@@ -28,20 +33,6 @@ if (! \class_exists(KafkaException::class, false)) {
         public string $kind_name = 'INTERNAL';
         public bool $retryable = false;
         public int $native_code = 0;
-
-        public function __construct(
-            string $message,
-            int $kind = 0,
-            string $kindName = 'INTERNAL',
-            bool $retryable = false,
-            int $nativeCode = 0,
-        ) {
-            parent::__construct($message, $kind);
-            $this->kind = $kind;
-            $this->kind_name = $kindName;
-            $this->retryable = $retryable;
-            $this->native_code = $nativeCode;
-        }
 
         /** 机器可读错误大类（数值）。 */
         public function getKind(): int

@@ -595,13 +595,15 @@ final class SwowClient implements ClientInterface
     {
         $err = hi_kafka_decode_error_frame($header . $payload);
 
-        return new \Hi\Kafka\KafkaException(
-            (string) $err['message'],
-            (int) $err['kind'],
-            (string) $err['kind_name'],
-            (bool) $err['retryable'],
-            (int) $err['native_code'],
-        );
+        // 2 参构造走（继承的）\Exception::__construct(message, code) → 经 create_object 捕获调用栈；
+        // 分类信息（kind/kind_name/retryable/native_code）构造后写入公开属性。
+        $e = new \Hi\Kafka\KafkaException((string) $err['message'], (int) $err['kind']);
+        $e->kind = (int) $err['kind'];
+        $e->kind_name = (string) $err['kind_name'];
+        $e->retryable = (bool) $err['retryable'];
+        $e->native_code = (int) $err['native_code'];
+
+        return $e;
     }
 
     private function assertExtension(): void
