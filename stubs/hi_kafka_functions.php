@@ -18,7 +18,9 @@ declare(strict_types=1);
 namespace {
 
     if (! \function_exists('hi_kafka_version')) {
-        /** 扩展版本号 */
+        /**
+         * 扩展版本号
+         */
         function hi_kafka_version(): string
         {
             return '';
@@ -26,7 +28,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_ensure_worker')) {
-        /** 显式启动 worker（如果还没在跑）。命中缓存时零开销。 */
+        /**
+         * 显式启动 worker（如果还没在跑）。命中缓存时零开销。
+         */
         function hi_kafka_ensure_worker(?string $socket = null): void
         {
         }
@@ -42,7 +46,7 @@ namespace {
             string $cluster,
             array $config,
             ?string $socket = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
     }
@@ -61,7 +65,7 @@ namespace {
             ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
-            ?string $socket = null
+            ?string $socket = null,
         ): void {
         }
     }
@@ -83,7 +87,7 @@ namespace {
             ?int $partition = null,
             ?int $timestampMs = null,
             ?int $timeoutMs = null,
-            ?string $socket = null
+            ?string $socket = null,
         ): array {
             return ['ok' => true];
         }
@@ -100,7 +104,7 @@ namespace {
             array $topics,
             ?array $config = null,
             ?string $socket = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): int {
             return 0;
         }
@@ -139,14 +143,18 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_track_subscription')) {
-        /** @internal 协程 driver 登记订阅，供进程退出时主动 unsubscribe + Goodbye */
+        /**
+         * @internal 协程 driver 登记订阅，供进程退出时主动 unsubscribe + Goodbye
+         */
         function hi_kafka_track_subscription(int $subscriptionId, ?string $socket = null): void
         {
         }
     }
 
     if (! \function_exists('hi_kafka_untrack_subscription')) {
-        /** @internal 与 hi_kafka_track_subscription 配对，driver 主动 unsubscribe 后注销 */
+        /**
+         * @internal 与 hi_kafka_track_subscription 配对，driver 主动 unsubscribe 后注销
+         */
         function hi_kafka_untrack_subscription(int $subscriptionId, ?string $socket = null): void
         {
         }
@@ -166,7 +174,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_retry_stats')) {
-        /** @return array{attempts: int, successes: int, failures: int} */
+        /**
+         * @return array{attempts: int, successes: int, failures: int}
+         */
         function hi_kafka_retry_stats(): array
         {
             return ['attempts' => 0, 'successes' => 0, 'failures' => 0];
@@ -174,7 +184,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_resubscribe_stats')) {
-        /** @return array{attempts: int, successes: int, failures: int} */
+        /**
+         * @return array{attempts: int, successes: int, failures: int}
+         */
         function hi_kafka_resubscribe_stats(): array
         {
             return ['attempts' => 0, 'successes' => 0, 'failures' => 0];
@@ -182,7 +194,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_runtime')) {
-        /** @return list<string> 例如 `["blocking"]` 或 `["blocking", "swoole"]` */
+        /**
+         * @return list<string> 例如 `["blocking"]` 或 `["blocking", "swoole"]`
+         */
         function hi_kafka_runtime(): array
         {
             return [];
@@ -194,7 +208,9 @@ namespace {
     // ========================================================================
 
     if (! \function_exists('hi_kafka_next_cid')) {
-        /** @internal */
+        /**
+         * @internal
+         */
         function hi_kafka_next_cid(): int
         {
             return 0;
@@ -202,7 +218,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_header_len')) {
-        /** @internal 协议帧头长度（常量 13） */
+        /**
+         * @internal 协议帧头长度（常量 13）
+         */
         function hi_kafka_header_len(): int
         {
             return 13;
@@ -210,7 +228,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_encode_hello_frame')) {
-        /** @internal */
+        /**
+         * @internal
+         */
         function hi_kafka_encode_hello_frame(): string
         {
             return '';
@@ -218,7 +238,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_verify_hello_resp')) {
-        /** @internal */
+        /**
+         * @internal
+         */
         function hi_kafka_verify_hello_resp(string $bytes): void
         {
         }
@@ -227,6 +249,7 @@ namespace {
     if (! \function_exists('hi_kafka_encode_fnf_frame')) {
         /**
          * @internal
+         *
          * @param array<string,string>|null $headers
          */
         function hi_kafka_encode_fnf_frame(
@@ -236,7 +259,7 @@ namespace {
             string $value,
             ?array $headers = null,
             ?int $partition = null,
-            ?int $timestampMs = null
+            ?int $timestampMs = null,
         ): string {
             return '';
         }
@@ -245,7 +268,9 @@ namespace {
     if (! \function_exists('hi_kafka_encode_req_frame')) {
         /**
          * @internal
+         *
          * @param array<string,string>|null $headers
+         *
          * @return array{cid: int, frame: string}
          */
         function hi_kafka_encode_req_frame(
@@ -255,7 +280,7 @@ namespace {
             string $value,
             ?array $headers = null,
             ?int $partition = null,
-            ?int $timestampMs = null
+            ?int $timestampMs = null,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -264,6 +289,7 @@ namespace {
     if (! \function_exists('hi_kafka_parse_header')) {
         /**
          * @internal
+         *
          * @return array{kind: int, cid: int, payload_len: int}
          */
         function hi_kafka_parse_header(string $bytes): array
@@ -275,6 +301,7 @@ namespace {
     if (! \function_exists('hi_kafka_decode_resp_frame')) {
         /**
          * @internal
+         *
          * @return array{cid: int, ok: bool, partition?: int, offset?: int, code?: int, message?: string, retryable?: bool}
          */
         function hi_kafka_decode_resp_frame(string $bytes): array
@@ -286,15 +313,17 @@ namespace {
     if (! \function_exists('hi_kafka_encode_subscribe_frame')) {
         /**
          * @internal
-         * @param string[] $topics
+         *
+         * @param string[]                  $topics
          * @param array<string,string>|null $config
+         *
          * @return array{cid: int, frame: string}
          */
         function hi_kafka_encode_subscribe_frame(
             string $cluster,
             string $groupId,
             array $topics,
-            ?array $config = null
+            ?array $config = null,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -303,6 +332,7 @@ namespace {
     if (! \function_exists('hi_kafka_encode_poll_frame')) {
         /**
          * @internal
+         *
          * @return array{cid: int, frame: string}
          */
         function hi_kafka_encode_poll_frame(int $subscriptionId, int $maxMessages, int $timeoutMs): array
@@ -314,6 +344,7 @@ namespace {
     if (! \function_exists('hi_kafka_encode_commit_frame')) {
         /**
          * @internal
+         *
          * @return array{cid: int, frame: string}
          */
         function hi_kafka_encode_commit_frame(int $subscriptionId): array
@@ -323,7 +354,9 @@ namespace {
     }
 
     if (! \function_exists('hi_kafka_encode_unsubscribe_frame')) {
-        /** @internal */
+        /**
+         * @internal
+         */
         function hi_kafka_encode_unsubscribe_frame(int $subscriptionId): string
         {
             return '';
@@ -333,7 +366,9 @@ namespace {
     if (! \function_exists('hi_kafka_encode_register_cluster_frame')) {
         /**
          * @internal
+         *
          * @param array<string,string> $config
+         *
          * @return array{cid: int, frame: string}
          */
         function hi_kafka_encode_register_cluster_frame(string $cluster, array $config): array
@@ -345,6 +380,7 @@ namespace {
     if (! \function_exists('hi_kafka_decode_consumer_resp')) {
         /**
          * @internal
+         *
          * @return array{
          *     kind: string,
          *     cid: int,
@@ -364,15 +400,17 @@ namespace {
     if (! \function_exists('hi_kafka_encode_pause_resume_frame')) {
         /**
          * @internal
+         *
          * @param string[] $topics
          * @param int[]    $partitions
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_pause_resume_frame(
             int $subscriptionId,
             int $op,
             array $topics,
-            array $partitions
+            array $partitions,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -381,16 +419,18 @@ namespace {
     if (! \function_exists('hi_kafka_encode_seek_by_offset_frame')) {
         /**
          * @internal
+         *
          * @param string[] $topics
          * @param int[]    $partitions
          * @param int[]    $offsets
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_seek_by_offset_frame(
             int $subscriptionId,
             array $topics,
             array $partitions,
-            array $offsets
+            array $offsets,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -399,15 +439,17 @@ namespace {
     if (! \function_exists('hi_kafka_encode_seek_by_timestamp_frame')) {
         /**
          * @internal
+         *
          * @param string[] $topics
          * @param int[]    $partitions
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_seek_by_timestamp_frame(
             int $subscriptionId,
             int $timestampMs,
             array $topics,
-            array $partitions
+            array $partitions,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -416,6 +458,7 @@ namespace {
     if (! \function_exists('hi_kafka_encode_txn_frame')) {
         /**
          * @internal
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_txn_frame(string $cluster, int $op): array
@@ -427,9 +470,11 @@ namespace {
     if (! \function_exists('hi_kafka_encode_send_offsets_frame')) {
         /**
          * @internal
+         *
          * @param string[] $topics
          * @param int[]    $partitions
          * @param int[]    $offsets
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_send_offsets_frame(
@@ -438,7 +483,7 @@ namespace {
             string $groupId,
             array $topics,
             array $partitions,
-            array $offsets
+            array $offsets,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -447,7 +492,9 @@ namespace {
     if (! \function_exists('hi_kafka_encode_set_oauth_token_frame')) {
         /**
          * @internal
+         *
          * @param array<string,string>|null $extensions
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_set_oauth_token_frame(
@@ -455,7 +502,7 @@ namespace {
             string $token,
             int $lifetimeMs,
             string $principalName,
-            ?array $extensions = null
+            ?array $extensions = null,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }
@@ -464,6 +511,7 @@ namespace {
     if (! \function_exists('hi_kafka_encode_poll_rebalance_frame')) {
         /**
          * @internal
+         *
          * @return array{cid:int, frame:string}
          */
         function hi_kafka_encode_poll_rebalance_frame(int $subscriptionId, int $maxEvents): array
