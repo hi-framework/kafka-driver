@@ -39,7 +39,9 @@ if (! \class_exists(Client::class, false)) {
         {
         }
 
-        /** 当前 client 的 socket 路径 */
+        /**
+         * 当前 client 的 socket 路径
+         */
         public function socket(): string
         {
             return '';
@@ -65,7 +67,7 @@ if (! \class_exists(Client::class, false)) {
         /**
          * Fire-and-forget 生产。**不等 broker ack**，吞吐量最高，无投递成功保证。
          *
-         * @param array<string,string> $headers Kafka 消息头（关联数组，UTF-8）
+         * @param array<string,string> $headers     Kafka 消息头（关联数组，UTF-8）
          * @param int|null             $partition   null = 由 librdkafka partitioner（key hash）决定
          * @param int|null             $timestampMs null = 当前时间戳
          */
@@ -76,7 +78,7 @@ if (! \class_exists(Client::class, false)) {
             string $value,
             ?array $headers = null,
             ?int $partition = null,
-            ?int $timestampMs = null
+            ?int $timestampMs = null,
         ): void {
         }
 
@@ -102,7 +104,7 @@ if (! \class_exists(Client::class, false)) {
             ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): array {
             return ['ok' => true];
         }
@@ -121,7 +123,7 @@ if (! \class_exists(Client::class, false)) {
             array $headerNames,
             array $headerValues,
             ?int $partition = null,
-            ?int $timestampMs = null
+            ?int $timestampMs = null,
         ): void {
         }
 
@@ -142,7 +144,7 @@ if (! \class_exists(Client::class, false)) {
             array $headerValues,
             ?int $partition = null,
             ?int $timestampMs = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): array {
             return ['ok' => true];
         }
@@ -160,7 +162,7 @@ if (! \class_exists(Client::class, false)) {
             string $groupId,
             array $topics,
             ?array $config = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): int {
             return 0;
         }
@@ -183,12 +185,16 @@ if (! \class_exists(Client::class, false)) {
             return [];
         }
 
-        /** 同步提交当前持有的 offsets */
+        /**
+         * 同步提交当前持有的 offsets
+         */
         public function commit(int $subscriptionId, ?int $timeoutMs = null): void
         {
         }
 
-        /** 退订（幂等）。worker 端 close consumer 走 spawn_blocking */
+        /**
+         * 退订（幂等）。worker 端 close consumer 走 spawn_blocking
+         */
         public function unsubscribe(int $subscriptionId): void
         {
         }
@@ -201,7 +207,7 @@ if (! \class_exists(Client::class, false)) {
         public function pollRebalanceEvents(
             int $subscriptionId,
             ?int $maxEvents = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): array {
             return [];
         }
@@ -218,7 +224,7 @@ if (! \class_exists(Client::class, false)) {
             array $topics,
             array $partitions,
             array $offsets,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
 
@@ -233,7 +239,7 @@ if (! \class_exists(Client::class, false)) {
             int $timestampMs,
             array $topics,
             array $partitions,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
 
@@ -247,7 +253,7 @@ if (! \class_exists(Client::class, false)) {
             int $subscriptionId,
             array $topics,
             array $partitions,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
 
@@ -261,7 +267,7 @@ if (! \class_exists(Client::class, false)) {
             int $subscriptionId,
             array $topics,
             array $partitions,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
 
@@ -272,12 +278,16 @@ if (! \class_exists(Client::class, false)) {
         {
         }
 
-        /** 原子提交事务里所有 in-flight 消息 */
+        /**
+         * 原子提交事务里所有 in-flight 消息
+         */
         public function commitTransaction(string $cluster, ?int $timeoutMs = null): void
         {
         }
 
-        /** 回滚事务，read_committed consumer 看不到这些消息 */
+        /**
+         * 回滚事务，read_committed consumer 看不到这些消息
+         */
         public function abortTransaction(string $cluster, ?int $timeoutMs = null): void
         {
         }
@@ -288,7 +298,7 @@ if (! \class_exists(Client::class, false)) {
          *
          * @param string[] $topics
          * @param int[]    $partitions
-         * @param int[]    $offsets next offset = last_consumed + 1
+         * @param int[]    $offsets    next offset = last_consumed + 1
          */
         public function sendOffsetsToTransaction(
             string $producerCluster,
@@ -297,7 +307,7 @@ if (! \class_exists(Client::class, false)) {
             array $topics,
             array $partitions,
             array $offsets,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
 
@@ -312,7 +322,7 @@ if (! \class_exists(Client::class, false)) {
             int $lifetimeMs,
             string $principalName,
             ?array $extensions = null,
-            ?int $timeoutMs = null
+            ?int $timeoutMs = null,
         ): void {
         }
     }

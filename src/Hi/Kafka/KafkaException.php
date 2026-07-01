@@ -34,25 +34,33 @@ if (! \class_exists(KafkaException::class, false)) {
         public bool $retryable = false;
         public int $native_code = 0;
 
-        /** 机器可读错误大类（数值）。 */
+        /**
+         * 机器可读错误大类（数值）。
+         */
         public function getKind(): int
         {
             return $this->kind;
         }
 
-        /** 错误大类名（如 "BROKER_RETRYABLE"）。 */
+        /**
+         * 错误大类名（如 "BROKER_RETRYABLE"）。
+         */
         public function getKindName(): string
         {
             return $this->kind_name;
         }
 
-        /** 是否值得重试。 */
+        /**
+         * 是否值得重试。
+         */
         public function isRetryable(): bool
         {
             return $this->retryable;
         }
 
-        /** 原生 librdkafka 错误码（无则 0）。 */
+        /**
+         * 原生 librdkafka 错误码（无则 0）。
+         */
         public function getNativeCode(): int
         {
             return $this->native_code;

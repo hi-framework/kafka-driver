@@ -57,7 +57,9 @@ if (! \interface_exists(ClientInterface::class, false)) {
          */
         public function registerCluster(string $cluster, array $config, ?int $timeoutMs = null): void;
 
-        /** 显式拉起 worker 进程（命中缓存时零开销）。第一次 produce / subscribe 会自动触发。 */
+        /**
+         * 显式拉起 worker 进程（命中缓存时零开销）。第一次 produce / subscribe 会自动触发。
+         */
         public function ensureWorker(): void;
 
         // ====================================================================
@@ -139,10 +141,14 @@ if (! \interface_exists(ClientInterface::class, false)) {
          */
         public function poll(int $subscriptionId, int $maxMessages, int $timeoutMs): array;
 
-        /** 同步提交当前持有的 offsets */
+        /**
+         * 同步提交当前持有的 offsets
+         */
         public function commit(int $subscriptionId, ?int $timeoutMs = null): void;
 
-        /** 退订（幂等） */
+        /**
+         * 退订（幂等）
+         */
         public function unsubscribe(int $subscriptionId): void;
 
         /**
@@ -215,13 +221,19 @@ if (! \interface_exists(ClientInterface::class, false)) {
         // 事务 + EOS Stream + SASL/OAUTHBEARER
         // ====================================================================
 
-        /** 开启事务。集群配置必须含 `transactional.id`。 */
+        /**
+         * 开启事务。集群配置必须含 `transactional.id`。
+         */
         public function beginTransaction(string $cluster, ?int $timeoutMs = null): void;
 
-        /** 原子提交事务里所有 in-flight 消息。 */
+        /**
+         * 原子提交事务里所有 in-flight 消息。
+         */
         public function commitTransaction(string $cluster, ?int $timeoutMs = null): void;
 
-        /** 回滚事务，read_committed consumer 看不到这些消息。 */
+        /**
+         * 回滚事务，read_committed consumer 看不到这些消息。
+         */
         public function abortTransaction(string $cluster, ?int $timeoutMs = null): void;
 
         /**
@@ -229,7 +241,7 @@ if (! \interface_exists(ClientInterface::class, false)) {
          *
          * @param string[] $topics
          * @param int[]    $partitions
-         * @param int[]    $offsets next offset = last_consumed + 1
+         * @param int[]    $offsets    next offset = last_consumed + 1
          */
         public function sendOffsetsToTransaction(
             string $producerCluster,
