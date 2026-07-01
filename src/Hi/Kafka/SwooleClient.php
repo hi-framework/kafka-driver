@@ -43,8 +43,8 @@ final class SwooleClient implements ClientInterface
     private int $errorFrameKind = 0;
 
     /**
-     * @param string $socket     Worker UDS 路径
-     * @param int    $maxIdle    池上限。idle 满了归还时直接 close
+     * @param string $socket         Worker UDS 路径
+     * @param int    $maxIdle        池上限。idle 满了归还时直接 close
      * @param float  $connectTimeout
      */
     public function __construct(
@@ -54,7 +54,7 @@ final class SwooleClient implements ClientInterface
     ) {
         $this->idleConns = new Channel($maxIdle);
         $this->assertExtension();
-        $this->errorFrameKind = hi_kafka_error_frame_kind();
+        $this->errorFrameKind = \hi_kafka_error_frame_kind();
     }
 
     /**
@@ -85,9 +85,9 @@ final class SwooleClient implements ClientInterface
     /**
      * Fire-and-forget 生产。立即返回，不等 ack。
      *
-     * @param array<string,string>|null $headers Kafka 消息头（traceparent / source 等）
-     * @param int|null $partition 明确写入分区；null = librdkafka partitioner（key hash）
-     * @param int|null $timestampMs 消息时间戳（毫秒）；null = librdkafka 当前时间
+     * @param array<string,string>|null $headers     Kafka 消息头（traceparent / source 等）
+     * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner（key hash）
+     * @param int|null                  $timestampMs 消息时间戳（毫秒）；null = librdkafka 当前时间
      */
     public function produceFnf(
         string $cluster,
@@ -98,45 +98,46 @@ final class SwooleClient implements ClientInterface
         ?int $partition = null,
         ?int $timestampMs = null,
     ): void {
-        $frame = hi_kafka_encode_fnf_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
+        $frame = \hi_kafka_encode_fnf_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
         $timeoutSec = 5.0;
         $conn = $this->acquire();
+
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if ($sent === false || $sent < strlen($frame)) {
+            if (false === $sent || $sent < \mb_strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'sendAll failed: ' . ($conn->errMsg ?: 'short write')
+                    'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
                 );
             }
             // FNF 分层：读 worker 本地 enqueue ack。cluster 不存在 / 队列满等同步可知
             // 错误会以 Error 帧回来 → KafkaException；不等 broker delivery。
-            $headerLen = hi_kafka_header_len();
+            $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if ($header === false || strlen($header) < $headerLen) {
+            if (false === $header || \mb_strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll fnf ack header failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll fnf ack header failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
-            $parsed = hi_kafka_parse_header($header);
+            $parsed = \hi_kafka_parse_header($header);
             $payloadLen = $parsed['payload_len'];
             $payload = $payloadLen > 0
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                $payload === false || strlen($payload) < $payloadLen
+                false === $payload || \mb_strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll fnf ack payload failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll fnf ack payload failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
             $this->release($conn);
             if ($parsed['kind'] === $this->errorFrameKind) {
                 throw $this->makeKafka($header, $payload);
             }
-        } catch (\Hi\Kafka\KafkaException $ke) {
+        } catch (KafkaException $ke) {
             throw $ke; // 连接已归还，业务错误不污染连接池
         } catch (\Throwable $e) {
             $conn->close();
@@ -154,9 +155,9 @@ final class SwooleClient implements ClientInterface
      * @param int $timeoutMs 单次 IO 操作超时（不是总耗时）
      */
     /**
-     * @param array<string,string>|null $headers Kafka 消息头
-     * @param int|null $partition 明确写入分区；null = librdkafka partitioner
-     * @param int|null $timestampMs 消息时间戳（毫秒）
+     * @param array<string,string>|null $headers     Kafka 消息头
+     * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner
+     * @param int|null                  $timestampMs 消息时间戳（毫秒）
      */
     public function produceSync(
         string $cluster,
@@ -168,34 +169,35 @@ final class SwooleClient implements ClientInterface
         ?int $timestampMs = null,
         ?int $timeoutMs = null,
     ): array {
-        $encoded = hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
+        $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
         $cid = $encoded['cid'];
         $frame = $encoded['frame'];
         $timeoutSec = ($timeoutMs ?? 5000) / 1000.0;
 
         $conn = $this->acquire();
+
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if ($sent === false || $sent < strlen($frame)) {
+            if (false === $sent || $sent < \mb_strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'sendAll failed: ' . ($conn->errMsg ?: 'short write')
+                    'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
                 );
             }
 
-            $headerLen = hi_kafka_header_len();
+            $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if ($header === false || strlen($header) < $headerLen) {
+            if (false === $header || \mb_strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll header failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll header failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
-            $parsed = hi_kafka_parse_header($header);
+            $parsed = \hi_kafka_parse_header($header);
             if ($parsed['cid'] !== $cid) {
                 $conn->close();
                 throw new \RuntimeException(
-                    "cid mismatch: sent $cid, got {$parsed['cid']}"
+                    "cid mismatch: sent {$cid}, got {$parsed['cid']}",
                 );
             }
 
@@ -204,11 +206,11 @@ final class SwooleClient implements ClientInterface
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                $payload === false || strlen($payload) < $payloadLen
+                false === $payload || \mb_strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll payload failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll payload failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
 
@@ -216,8 +218,8 @@ final class SwooleClient implements ClientInterface
             if ($parsed['kind'] === $this->errorFrameKind) {
                 throw $this->makeKafka($header, $payload);
             }
-            return hi_kafka_decode_resp_frame($header . $payload);
-        } catch (\Hi\Kafka\KafkaException $ke) {
+            return \hi_kafka_decode_resp_frame($header . $payload);
+        } catch (KafkaException $ke) {
             throw $ke;
         } catch (\Throwable $e) {
             $conn->close();
@@ -232,7 +234,7 @@ final class SwooleClient implements ClientInterface
      */
     public function registerCluster(string $cluster, array $config, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_register_cluster_frame($cluster, $config);
+        $encoded = \hi_kafka_encode_register_cluster_frame($cluster, $config);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("registerCluster failed: {$resp['message']}");
@@ -242,7 +244,7 @@ final class SwooleClient implements ClientInterface
     /**
      * 订阅 topics，返回 subscription_id。
      *
-     * @param string[] $topics
+     * @param string[]                  $topics
      * @param array<string,string>|null $config 例如 ['auto.offset.reset' => 'earliest']
      */
     public function subscribe(
@@ -252,7 +254,7 @@ final class SwooleClient implements ClientInterface
         ?array $config = null,
         ?int $timeoutMs = null,
     ): int {
-        $encoded = hi_kafka_encode_subscribe_frame($cluster, $groupId, $topics, $config ?? []);
+        $encoded = \hi_kafka_encode_subscribe_frame($cluster, $groupId, $topics, $config ?? []);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("subscribe failed: {$resp['message']}");
@@ -261,7 +263,7 @@ final class SwooleClient implements ClientInterface
         // 登记订阅 → 进程退出(MSHUTDOWN)时扩展主动 unsubscribe + Goodbye，让 worker 亚秒自退。
         // 协程 driver 订阅不进 Rust 注册表，不登记则消费者进程退出后 worker 要干等 idle 超时。
         if (\function_exists('hi_kafka_track_subscription')) {
-            hi_kafka_track_subscription($id, $this->socket);
+            \hi_kafka_track_subscription($id, $this->socket);
         }
         return $id;
     }
@@ -273,7 +275,7 @@ final class SwooleClient implements ClientInterface
      */
     public function poll(int $subscriptionId, int $maxMessages, int $timeoutMs): array
     {
-        $encoded = hi_kafka_encode_poll_frame($subscriptionId, $maxMessages, $timeoutMs);
+        $encoded = \hi_kafka_encode_poll_frame($subscriptionId, $maxMessages, $timeoutMs);
         // IPC 超时 = poll 业务超时 + 2s 安全裕度
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs + 2000);
         if (! $resp['ok']) {
@@ -287,7 +289,7 @@ final class SwooleClient implements ClientInterface
      */
     public function commit(int $subscriptionId, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_commit_frame($subscriptionId);
+        $encoded = \hi_kafka_encode_commit_frame($subscriptionId);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("commit failed: {$resp['message']}");
@@ -301,16 +303,17 @@ final class SwooleClient implements ClientInterface
     {
         // 注销订阅登记，避免 MSHUTDOWN 重复 unsubscribe 已退订的订阅。
         if (\function_exists('hi_kafka_untrack_subscription')) {
-            hi_kafka_untrack_subscription($subscriptionId, $this->socket);
+            \hi_kafka_untrack_subscription($subscriptionId, $this->socket);
         }
-        $frame = hi_kafka_encode_unsubscribe_frame($subscriptionId);
+        $frame = \hi_kafka_encode_unsubscribe_frame($subscriptionId);
         $conn = $this->acquire();
+
         try {
             $sent = $conn->sendAll($frame);
-            if ($sent === false || $sent < strlen($frame)) {
+            if (false === $sent || $sent < \mb_strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'sendAll failed: ' . ($conn->errMsg ?: 'short write')
+                    'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
                 );
             }
             $this->release($conn);
@@ -330,7 +333,7 @@ final class SwooleClient implements ClientInterface
      */
     public function pause(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_pause_resume_frame($subscriptionId, 0, $topics, $partitions);
+        $encoded = \hi_kafka_encode_pause_resume_frame($subscriptionId, 0, $topics, $partitions);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("pause failed: {$resp['message']}");
@@ -345,7 +348,7 @@ final class SwooleClient implements ClientInterface
      */
     public function resume(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_pause_resume_frame($subscriptionId, 1, $topics, $partitions);
+        $encoded = \hi_kafka_encode_pause_resume_frame($subscriptionId, 1, $topics, $partitions);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("resume failed: {$resp['message']}");
@@ -361,7 +364,7 @@ final class SwooleClient implements ClientInterface
      */
     public function seek(int $subscriptionId, array $topics, array $partitions, array $offsets, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_seek_by_offset_frame($subscriptionId, $topics, $partitions, $offsets);
+        $encoded = \hi_kafka_encode_seek_by_offset_frame($subscriptionId, $topics, $partitions, $offsets);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 10000);
         if (! $resp['ok']) {
             throw new \RuntimeException("seek failed: {$resp['message']}");
@@ -381,8 +384,11 @@ final class SwooleClient implements ClientInterface
         array $partitions,
         ?int $timeoutMs = null,
     ): void {
-        $encoded = hi_kafka_encode_seek_by_timestamp_frame(
-            $subscriptionId, $timestampMs, $topics, $partitions
+        $encoded = \hi_kafka_encode_seek_by_timestamp_frame(
+            $subscriptionId,
+            $timestampMs,
+            $topics,
+            $partitions,
         );
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 15000);
         if (! $resp['ok']) {
@@ -395,7 +401,7 @@ final class SwooleClient implements ClientInterface
      */
     public function beginTransaction(string $cluster, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_txn_frame($cluster, 0);
+        $encoded = \hi_kafka_encode_txn_frame($cluster, 0);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("beginTransaction failed: {$resp['message']}");
@@ -404,7 +410,7 @@ final class SwooleClient implements ClientInterface
 
     public function commitTransaction(string $cluster, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_txn_frame($cluster, 1);
+        $encoded = \hi_kafka_encode_txn_frame($cluster, 1);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("commitTransaction failed: {$resp['message']}");
@@ -413,7 +419,7 @@ final class SwooleClient implements ClientInterface
 
     public function abortTransaction(string $cluster, ?int $timeoutMs = null): void
     {
-        $encoded = hi_kafka_encode_txn_frame($cluster, 2);
+        $encoded = \hi_kafka_encode_txn_frame($cluster, 2);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("abortTransaction failed: {$resp['message']}");
@@ -426,7 +432,7 @@ final class SwooleClient implements ClientInterface
      *
      * @param string[] $topics
      * @param int[]    $partitions
-     * @param int[]    $offsets   每个是 last_consumed + 1
+     * @param int[]    $offsets    每个是 last_consumed + 1
      */
     public function sendOffsetsToTransaction(
         string $producerCluster,
@@ -437,8 +443,13 @@ final class SwooleClient implements ClientInterface
         array $offsets,
         ?int $timeoutMs = null,
     ): void {
-        $encoded = hi_kafka_encode_send_offsets_frame(
-            $producerCluster, $subscriptionId, $groupId, $topics, $partitions, $offsets
+        $encoded = \hi_kafka_encode_send_offsets_frame(
+            $producerCluster,
+            $subscriptionId,
+            $groupId,
+            $topics,
+            $partitions,
+            $offsets,
         );
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
@@ -459,8 +470,12 @@ final class SwooleClient implements ClientInterface
         ?array $extensions = null,
         ?int $timeoutMs = null,
     ): void {
-        $encoded = hi_kafka_encode_set_oauth_token_frame(
-            $cluster, $token, $lifetimeMs, $principalName, $extensions ?? []
+        $encoded = \hi_kafka_encode_set_oauth_token_frame(
+            $cluster,
+            $token,
+            $lifetimeMs,
+            $principalName,
+            $extensions ?? [],
         );
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
@@ -475,7 +490,7 @@ final class SwooleClient implements ClientInterface
      */
     public function pollRebalanceEvents(int $subscriptionId, ?int $maxEvents = null, ?int $timeoutMs = null): array
     {
-        $encoded = hi_kafka_encode_poll_rebalance_frame($subscriptionId, $maxEvents ?? 100);
+        $encoded = \hi_kafka_encode_poll_rebalance_frame($subscriptionId, $maxEvents ?? 100);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("pollRebalanceEvents failed: {$resp['message']}");
@@ -507,28 +522,29 @@ final class SwooleClient implements ClientInterface
         $timeoutMs ??= 5000;
         $timeoutSec = $timeoutMs / 1000.0;
         $conn = $this->acquire();
+
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if ($sent === false || $sent < strlen($frame)) {
+            if (false === $sent || $sent < \mb_strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'sendAll failed: ' . ($conn->errMsg ?: 'short write')
+                    'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
                 );
             }
 
-            $headerLen = hi_kafka_header_len();
+            $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if ($header === false || strlen($header) < $headerLen) {
+            if (false === $header || \mb_strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll header failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll header failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
-            $parsed = hi_kafka_parse_header($header);
+            $parsed = \hi_kafka_parse_header($header);
             if ($parsed['cid'] !== $cid) {
                 $conn->close();
                 throw new \RuntimeException(
-                    "cid mismatch: sent $cid, got {$parsed['cid']}"
+                    "cid mismatch: sent {$cid}, got {$parsed['cid']}",
                 );
             }
 
@@ -537,11 +553,11 @@ final class SwooleClient implements ClientInterface
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                $payload === false || strlen($payload) < $payloadLen
+                false === $payload || \mb_strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
-                    'recvAll payload failed: ' . ($conn->errMsg ?: 'short read')
+                    'recvAll payload failed: ' . ($conn->errMsg ?: 'short read'),
                 );
             }
 
@@ -549,8 +565,8 @@ final class SwooleClient implements ClientInterface
             if ($parsed['kind'] === $this->errorFrameKind) {
                 throw $this->makeKafka($header, $payload);
             }
-            return hi_kafka_decode_consumer_resp($header . $payload);
-        } catch (\Hi\Kafka\KafkaException $ke) {
+            return \hi_kafka_decode_consumer_resp($header . $payload);
+        } catch (KafkaException $ke) {
             throw $ke;
         } catch (\Throwable $e) {
             $conn->close();
@@ -561,13 +577,13 @@ final class SwooleClient implements ClientInterface
     /**
      * 把 worker 回的 Error 帧解码成 KafkaException（不抛，由调用方 throw）。
      */
-    private function makeKafka(string $header, string $payload): \Hi\Kafka\KafkaException
+    private function makeKafka(string $header, string $payload): KafkaException
     {
-        $err = hi_kafka_decode_error_frame($header . $payload);
+        $err = \hi_kafka_decode_error_frame($header . $payload);
 
         // 2 参构造走（继承的）\Exception::__construct(message, code) → 经 create_object 捕获调用栈；
         // 分类信息（kind/kind_name/retryable/native_code）构造后写入公开属性。
-        $e = new \Hi\Kafka\KafkaException((string) $err['message'], (int) $err['kind']);
+        $e = new KafkaException((string) $err['message'], (int) $err['kind']);
         $e->kind = (int) $err['kind'];
         $e->kind_name = (string) $err['kind_name'];
         $e->retryable = (bool) $err['retryable'];
@@ -602,16 +618,17 @@ final class SwooleClient implements ClientInterface
         // 首次连接前确保 worker 已 fork 起来。
         // 走扩展的 hi_kafka_ensure_worker，重用其 flock + double-fork 互斥逻辑。
         if (! $this->workerEnsured) {
-            hi_kafka_ensure_worker($this->socket);
+            \hi_kafka_ensure_worker($this->socket);
             $this->workerEnsured = true;
         }
 
         $conn = new Socket(self::AF_UNIX, self::SOCK_STREAM, 0);
         if (! $conn->connect($this->socket, 0, $this->connectTimeout)) {
             throw new \RuntimeException(
-                "connect {$this->socket} failed: " . $conn->errMsg
+                "connect {$this->socket} failed: " . $conn->errMsg,
             );
         }
+
         // F: 协议 HELLO 握手——双端 PROTOCOL_MAJOR 不一致 worker 会关连接，
         // 这里同步发 HELLO + 读 14B RESP + 校验
         try {
@@ -619,7 +636,9 @@ final class SwooleClient implements ClientInterface
         } catch (\Throwable $e) {
             $conn->close();
             throw new \RuntimeException(
-                "handshake {$this->socket} failed: " . $e->getMessage(), 0, $e
+                "handshake {$this->socket} failed: " . $e->getMessage(),
+                0,
+                $e,
             );
         }
         $this->created++;
@@ -628,22 +647,22 @@ final class SwooleClient implements ClientInterface
 
     private function handshake(Socket $conn): void
     {
-        $frame = hi_kafka_encode_hello_frame();
+        $frame = \hi_kafka_encode_hello_frame();
         $timeoutSec = 2.0;
         $sent = $conn->sendAll($frame, $timeoutSec);
-        if ($sent === false || $sent < strlen($frame)) {
+        if (false === $sent || $sent < \mb_strlen($frame)) {
             throw new \RuntimeException(
-                'send HELLO failed: ' . ($conn->errMsg ?: 'short write')
+                'send HELLO failed: ' . ($conn->errMsg ?: 'short write'),
             );
         }
         // HELLO RESP 固定 14B（13B header + 1B major），单次 recvAll
         $resp = $conn->recvAll(14, $timeoutSec);
-        if ($resp === false || strlen($resp) < 14) {
+        if (false === $resp || \mb_strlen($resp) < 14) {
             throw new \RuntimeException(
-                'recv HELLO RESP failed: ' . ($conn->errMsg ?: 'short read')
+                'recv HELLO RESP failed: ' . ($conn->errMsg ?: 'short read'),
             );
         }
-        hi_kafka_verify_hello_resp($resp);
+        \hi_kafka_verify_hello_resp($resp);
     }
 
     /**
@@ -652,22 +671,22 @@ final class SwooleClient implements ClientInterface
     public function ensureWorker(): void
     {
         if (! $this->workerEnsured) {
-            hi_kafka_ensure_worker($this->socket);
+            \hi_kafka_ensure_worker($this->socket);
             $this->workerEnsured = true;
         }
     }
 
     private function assertExtension(): void
     {
-        if (! function_exists('hi_kafka_encode_fnf_frame')
-            || ! function_exists('hi_kafka_encode_subscribe_frame')
-            || ! function_exists('hi_kafka_decode_consumer_resp')
+        if (! \function_exists('hi_kafka_encode_fnf_frame')
+            || ! \function_exists('hi_kafka_encode_subscribe_frame')
+            || ! \function_exists('hi_kafka_decode_consumer_resp')
         ) {
             throw new \RuntimeException(
-                'hi_kafka extension with producer+consumer protocol helpers is required'
+                'hi_kafka extension with producer+consumer protocol helpers is required',
             );
         }
-        if (! extension_loaded('swoole')) {
+        if (! \extension_loaded('swoole')) {
             throw new \RuntimeException('swoole extension is required for SwooleClient');
         }
     }
