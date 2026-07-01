@@ -16,11 +16,14 @@ namespace Hi\Kafka;
  * - 扩展缺失 → autoload 触发 → guard 不命中 → 落桩
  *
  * **为什么扩展端注册的是空 interface 而桩里却含 18 个方法签名**：
- * PHP runtime 的 LSP 校验是基于扩展端那份 interface（空）跑的，扩展类
- * `Hi\Kafka\Client` 和 PHP 类 `SwooleClient` / `SwowClient` 各自方法签名
- * 的差异（`$timeoutMs` 默认值 / `produceSync` 参数顺序）**不会**触发兼容错误。
- * 静态分析层（PHPStan / Psalm / IDE）只读源码看到桩里的签名，用于推断
- * 业务侧方法调用是否合法。
+ * 扩展端 MINIT 注册空 marker，是为了让 ext 类 `Hi\Kafka\Client` 无需在
+ * Rust 侧重复声明抽象方法即可 implements 本接口。三个实现（ext `Client` /
+ * `SwooleClient` / `SwowClient`）的 18 个共享方法签名**已完全统一**——
+ * camelCase 参数名、参数顺序、`?type = null` 可选形态逐一一致，因此无扩展
+ * 环境下三者对本桩接口的 LSP 校验也全部通过（曾经的 `$timeoutMs` 默认值 /
+ * `produceSync` 参数顺序差异会在无扩展 CI 触发 "must be compatible" fatal，
+ * 现已消除）。静态分析层（PHPStan / Psalm / IDE）只读源码看到桩里的签名，
+ * 用于推断业务侧方法调用是否合法。
  *
  * 本接口只声明**三者公共业务方法**（约 18 个）；下列**不**在内：
  * - `Client::__construct(?string $socket)` —— 构造参数三家不同（SwooleClient 有 maxIdle）
@@ -71,7 +74,7 @@ if (! \interface_exists(ClientInterface::class, false)) {
             string $topic,
             string $key,
             string $value,
-            array $headers = [],
+            ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
         ): void;
@@ -95,7 +98,7 @@ if (! \interface_exists(ClientInterface::class, false)) {
             string $topic,
             string $key,
             string $value,
-            array $headers = [],
+            ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
             ?int $timeoutMs = null,
@@ -248,7 +251,7 @@ if (! \interface_exists(ClientInterface::class, false)) {
             string $token,
             int $lifetimeMs,
             string $principalName,
-            array $extensions = [],
+            ?array $extensions = null,
             ?int $timeoutMs = null,
         ): void;
     }

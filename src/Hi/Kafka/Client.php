@@ -74,7 +74,7 @@ if (! \class_exists(Client::class, false)) {
             string $topic,
             string $key,
             string $value,
-            array $headers = [],
+            ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null
         ): void {
@@ -99,7 +99,7 @@ if (! \class_exists(Client::class, false)) {
             string $topic,
             string $key,
             string $value,
-            array $headers = [],
+            ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
             ?int $timeoutMs = null
@@ -311,7 +311,7 @@ if (! \class_exists(Client::class, false)) {
             string $token,
             int $lifetimeMs,
             string $principalName,
-            array $extensions = [],
+            ?array $extensions = null,
             ?int $timeoutMs = null
         ): void {
         }

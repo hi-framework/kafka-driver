@@ -163,15 +163,15 @@ final class SwooleClient implements ClientInterface
         string $topic,
         string $key,
         string $value,
-        int $timeoutMs = 5000,
         ?array $headers = null,
         ?int $partition = null,
         ?int $timestampMs = null,
+        ?int $timeoutMs = null,
     ): array {
         $encoded = hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
         $cid = $encoded['cid'];
         $frame = $encoded['frame'];
-        $timeoutSec = $timeoutMs / 1000.0;
+        $timeoutSec = ($timeoutMs ?? 5000) / 1000.0;
 
         $conn = $this->acquire();
         try {
@@ -230,7 +230,7 @@ final class SwooleClient implements ClientInterface
      *
      * @param array<string,string> $config
      */
-    public function registerCluster(string $cluster, array $config, int $timeoutMs = 5000): void
+    public function registerCluster(string $cluster, array $config, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_register_cluster_frame($cluster, $config);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
@@ -250,7 +250,7 @@ final class SwooleClient implements ClientInterface
         string $groupId,
         array $topics,
         ?array $config = null,
-        int $timeoutMs = 5000,
+        ?int $timeoutMs = null,
     ): int {
         $encoded = hi_kafka_encode_subscribe_frame($cluster, $groupId, $topics, $config ?? []);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
@@ -285,7 +285,7 @@ final class SwooleClient implements ClientInterface
     /**
      * 同步提交 offset。
      */
-    public function commit(int $subscriptionId, int $timeoutMs = 5000): void
+    public function commit(int $subscriptionId, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_commit_frame($subscriptionId);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
@@ -328,7 +328,7 @@ final class SwooleClient implements ClientInterface
      * @param string[] $topics
      * @param int[]    $partitions
      */
-    public function pause(int $subscriptionId, array $topics, array $partitions, int $timeoutMs = 5000): void
+    public function pause(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_pause_resume_frame($subscriptionId, 0, $topics, $partitions);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
@@ -343,7 +343,7 @@ final class SwooleClient implements ClientInterface
      * @param string[] $topics
      * @param int[]    $partitions
      */
-    public function resume(int $subscriptionId, array $topics, array $partitions, int $timeoutMs = 5000): void
+    public function resume(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_pause_resume_frame($subscriptionId, 1, $topics, $partitions);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
@@ -359,10 +359,10 @@ final class SwooleClient implements ClientInterface
      * @param int[]    $partitions
      * @param int[]    $offsets
      */
-    public function seek(int $subscriptionId, array $topics, array $partitions, array $offsets, int $timeoutMs = 10000): void
+    public function seek(int $subscriptionId, array $topics, array $partitions, array $offsets, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_seek_by_offset_frame($subscriptionId, $topics, $partitions, $offsets);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 10000);
         if (! $resp['ok']) {
             throw new \RuntimeException("seek failed: {$resp['message']}");
         }
@@ -379,12 +379,12 @@ final class SwooleClient implements ClientInterface
         int $timestampMs,
         array $topics,
         array $partitions,
-        int $timeoutMs = 15000,
+        ?int $timeoutMs = null,
     ): void {
         $encoded = hi_kafka_encode_seek_by_timestamp_frame(
             $subscriptionId, $timestampMs, $topics, $partitions
         );
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 15000);
         if (! $resp['ok']) {
             throw new \RuntimeException("seekToTimestamp failed: {$resp['message']}");
         }
@@ -393,28 +393,28 @@ final class SwooleClient implements ClientInterface
     /**
      * 开启事务。集群配置必须含 `transactional.id`。
      */
-    public function beginTransaction(string $cluster, int $timeoutMs = 30000): void
+    public function beginTransaction(string $cluster, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_txn_frame($cluster, 0);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("beginTransaction failed: {$resp['message']}");
         }
     }
 
-    public function commitTransaction(string $cluster, int $timeoutMs = 30000): void
+    public function commitTransaction(string $cluster, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_txn_frame($cluster, 1);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("commitTransaction failed: {$resp['message']}");
         }
     }
 
-    public function abortTransaction(string $cluster, int $timeoutMs = 30000): void
+    public function abortTransaction(string $cluster, ?int $timeoutMs = null): void
     {
         $encoded = hi_kafka_encode_txn_frame($cluster, 2);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("abortTransaction failed: {$resp['message']}");
         }
@@ -435,12 +435,12 @@ final class SwooleClient implements ClientInterface
         array $topics,
         array $partitions,
         array $offsets,
-        int $timeoutMs = 30000,
+        ?int $timeoutMs = null,
     ): void {
         $encoded = hi_kafka_encode_send_offsets_frame(
             $producerCluster, $subscriptionId, $groupId, $topics, $partitions, $offsets
         );
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
+        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
         if (! $resp['ok']) {
             throw new \RuntimeException("sendOffsetsToTransaction failed: {$resp['message']}");
         }
@@ -456,11 +456,11 @@ final class SwooleClient implements ClientInterface
         string $token,
         int $lifetimeMs,
         string $principalName,
-        array $extensions = [],
-        int $timeoutMs = 5000,
+        ?array $extensions = null,
+        ?int $timeoutMs = null,
     ): void {
         $encoded = hi_kafka_encode_set_oauth_token_frame(
-            $cluster, $token, $lifetimeMs, $principalName, $extensions
+            $cluster, $token, $lifetimeMs, $principalName, $extensions ?? []
         );
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
@@ -473,9 +473,9 @@ final class SwooleClient implements ClientInterface
      *
      * @return list<array{type:string, partitions?:list<array{topic:string,partition:int}>, message?:string}>
      */
-    public function pollRebalanceEvents(int $subscriptionId, int $maxEvents = 100, int $timeoutMs = 5000): array
+    public function pollRebalanceEvents(int $subscriptionId, ?int $maxEvents = null, ?int $timeoutMs = null): array
     {
-        $encoded = hi_kafka_encode_poll_rebalance_frame($subscriptionId, $maxEvents);
+        $encoded = hi_kafka_encode_poll_rebalance_frame($subscriptionId, $maxEvents ?? 100);
         $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
         if (! $resp['ok']) {
             throw new \RuntimeException("pollRebalanceEvents failed: {$resp['message']}");
@@ -502,8 +502,9 @@ final class SwooleClient implements ClientInterface
      *
      * @return array 结构同 hi_kafka_decode_consumer_resp 输出
      */
-    private function roundTrip(int $cid, string $frame, int $timeoutMs): array
+    private function roundTrip(int $cid, string $frame, ?int $timeoutMs = null): array
     {
+        $timeoutMs ??= 5000;
         $timeoutSec = $timeoutMs / 1000.0;
         $conn = $this->acquire();
         try {
