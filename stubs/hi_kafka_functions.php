@@ -281,6 +281,7 @@ namespace {
             ?array $headers = null,
             ?int $partition = null,
             ?int $timestampMs = null,
+            ?int $timeoutMs = null,
         ): array {
             return ['cid' => 0, 'frame' => ''];
         }

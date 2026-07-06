@@ -88,6 +88,8 @@ final class SwooleClient implements ClientInterface
      * @param array<string,string>|null $headers     Kafka 消息头（traceparent / source 等）
      * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner（key hash）
      * @param int|null                  $timestampMs 消息时间戳（毫秒）；null = librdkafka 当前时间
+     * @param int|null                  $timeoutMs   IPC 单次 IO 超时（毫秒），默认 5000
+     *                                               —— **LSP 扩展**：追加可选参数，接口/扩展 Client 无此参数不影响
      */
     public function produceFnf(
         string $cluster,
@@ -97,14 +99,15 @@ final class SwooleClient implements ClientInterface
         ?array $headers = null,
         ?int $partition = null,
         ?int $timestampMs = null,
+        ?int $timeoutMs = null,
     ): void {
         $frame = \hi_kafka_encode_fnf_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
-        $timeoutSec = 5.0;
+        $timeoutSec = ($timeoutMs ?? 5000) / 1000.0;
         $conn = $this->acquire();
 
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if (false === $sent || $sent < \mb_strlen($frame)) {
+            if (false === $sent || $sent < \strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
                     'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
@@ -114,7 +117,7 @@ final class SwooleClient implements ClientInterface
             // 错误会以 Error 帧回来 → KafkaException；不等 broker delivery。
             $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if (false === $header || \mb_strlen($header) < $headerLen) {
+            if (false === $header || \strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
                     'recvAll fnf ack header failed: ' . ($conn->errMsg ?: 'short read'),
@@ -126,7 +129,7 @@ final class SwooleClient implements ClientInterface
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                false === $payload || \mb_strlen($payload) < $payloadLen
+                false === $payload || \strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
@@ -169,16 +172,17 @@ final class SwooleClient implements ClientInterface
         ?int $timestampMs = null,
         ?int $timeoutMs = null,
     ): array {
-        $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
+        $timeoutMs ??= 5000;
+        $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs, $timeoutMs);
         $cid = $encoded['cid'];
         $frame = $encoded['frame'];
-        $timeoutSec = ($timeoutMs ?? 5000) / 1000.0;
+        $timeoutSec = $timeoutMs / 1000.0;
 
         $conn = $this->acquire();
 
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if (false === $sent || $sent < \mb_strlen($frame)) {
+            if (false === $sent || $sent < \strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
                     'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
@@ -187,7 +191,7 @@ final class SwooleClient implements ClientInterface
 
             $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if (false === $header || \mb_strlen($header) < $headerLen) {
+            if (false === $header || \strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
                     'recvAll header failed: ' . ($conn->errMsg ?: 'short read'),
@@ -206,7 +210,7 @@ final class SwooleClient implements ClientInterface
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                false === $payload || \mb_strlen($payload) < $payloadLen
+                false === $payload || \strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
@@ -309,8 +313,10 @@ final class SwooleClient implements ClientInterface
         $conn = $this->acquire();
 
         try {
-            $sent = $conn->sendAll($frame);
-            if (false === $sent || $sent < \mb_strlen($frame)) {
+            // unsubscribe 是 FNF，给 1s 兜底超时防 socket buffer 满时无限阻塞
+            // （极端场景：worker 卡住不 reader，PHP 退出流程被这里挂住）
+            $sent = $conn->sendAll($frame, 1.0);
+            if (false === $sent || $sent < \strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
                     'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
@@ -525,7 +531,7 @@ final class SwooleClient implements ClientInterface
 
         try {
             $sent = $conn->sendAll($frame, $timeoutSec);
-            if (false === $sent || $sent < \mb_strlen($frame)) {
+            if (false === $sent || $sent < \strlen($frame)) {
                 $conn->close();
                 throw new \RuntimeException(
                     'sendAll failed: ' . ($conn->errMsg ?: 'short write'),
@@ -534,7 +540,7 @@ final class SwooleClient implements ClientInterface
 
             $headerLen = \hi_kafka_header_len();
             $header = $conn->recvAll($headerLen, $timeoutSec);
-            if (false === $header || \mb_strlen($header) < $headerLen) {
+            if (false === $header || \strlen($header) < $headerLen) {
                 $conn->close();
                 throw new \RuntimeException(
                     'recvAll header failed: ' . ($conn->errMsg ?: 'short read'),
@@ -553,7 +559,7 @@ final class SwooleClient implements ClientInterface
                 ? $conn->recvAll($payloadLen, $timeoutSec)
                 : '';
             if ($payloadLen > 0 && (
-                false === $payload || \mb_strlen($payload) < $payloadLen
+                false === $payload || \strlen($payload) < $payloadLen
             )) {
                 $conn->close();
                 throw new \RuntimeException(
@@ -594,12 +600,19 @@ final class SwooleClient implements ClientInterface
 
     private function acquire(): Socket
     {
-        // 池里有空闲就拿，没有就建新
-        if (! $this->idleConns->isEmpty()) {
+        // 池里有空闲就拿，但要做半死连接探测——worker 崩溃重启后池里的旧 fd 会挂到用时才炸。
+        // Swoole 4.5+ 的 checkLiveness() 内部走 nonblocking peek，探测 peer 是否已关连接。
+        // 老版本缺此方法 → 只能盲发盲收，与 checkLiveness 缺失前的行为一致（首次撞死一个连接才踢出）。
+        while (! $this->idleConns->isEmpty()) {
             $conn = $this->idleConns->pop(0.001);
-            if ($conn instanceof Socket) {
-                return $conn;
+            if (! $conn instanceof Socket) {
+                continue;
             }
+            if (\method_exists($conn, 'checkLiveness') && ! $conn->checkLiveness()) {
+                $conn->close();
+                continue;
+            }
+            return $conn;
         }
         return $this->newConn();
     }
@@ -610,7 +623,11 @@ final class SwooleClient implements ClientInterface
             $conn->close();
             return;
         }
-        $this->idleConns->push($conn, 0.001);
+        // push 可能因多协程并发 race 而超时返回 false（isFull 检查后到实际 push 期间池被塞满）。
+        // 不接住会漏 fd —— 显式 close 兜底。
+        if (! $this->idleConns->push($conn, 0.001)) {
+            $conn->close();
+        }
     }
 
     private function newConn(): Socket
@@ -650,14 +667,14 @@ final class SwooleClient implements ClientInterface
         $frame = \hi_kafka_encode_hello_frame();
         $timeoutSec = 2.0;
         $sent = $conn->sendAll($frame, $timeoutSec);
-        if (false === $sent || $sent < \mb_strlen($frame)) {
+        if (false === $sent || $sent < \strlen($frame)) {
             throw new \RuntimeException(
                 'send HELLO failed: ' . ($conn->errMsg ?: 'short write'),
             );
         }
         // HELLO RESP 固定 14B（13B header + 1B major），单次 recvAll
         $resp = $conn->recvAll(14, $timeoutSec);
-        if (false === $resp || \mb_strlen($resp) < 14) {
+        if (false === $resp || \strlen($resp) < 14) {
             throw new \RuntimeException(
                 'recv HELLO RESP failed: ' . ($conn->errMsg ?: 'short read'),
             );
@@ -678,13 +695,20 @@ final class SwooleClient implements ClientInterface
 
     private function assertExtension(): void
     {
-        if (! \function_exists('hi_kafka_encode_fnf_frame')
-            || ! \function_exists('hi_kafka_encode_subscribe_frame')
-            || ! \function_exists('hi_kafka_decode_consumer_resp')
-        ) {
-            throw new \RuntimeException(
-                'hi_kafka extension with producer+consumer protocol helpers is required',
-            );
+        // 构造函数下一行就要调 hi_kafka_error_frame_kind()；缺任何一个都直接 fatal，
+        // 这里显式列出全部构造期依赖的探针函数，让报错落到清晰的 RuntimeException 而不是 undefined function。
+        $required = [
+            'hi_kafka_encode_fnf_frame',
+            'hi_kafka_encode_subscribe_frame',
+            'hi_kafka_decode_consumer_resp',
+            'hi_kafka_error_frame_kind',
+        ];
+        foreach ($required as $fn) {
+            if (! \function_exists($fn)) {
+                throw new \RuntimeException(
+                    "hi_kafka extension missing required function '{$fn}' (version skew?)",
+                );
+            }
         }
         if (! \extension_loaded('swoole')) {
             throw new \RuntimeException('swoole extension is required for SwooleClient');

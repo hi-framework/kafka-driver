@@ -92,6 +92,8 @@ final class SwowClient implements ClientInterface
      * @param array<string,string>|null $headers     Kafka 消息头
      * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner（key hash）
      * @param int|null                  $timestampMs 消息时间戳（毫秒）；null = librdkafka 当前时间
+     * @param int|null                  $timeoutMs   IPC 单次 IO 超时（毫秒），默认 5000
+     *                                               —— **LSP 扩展**：追加可选参数，接口/扩展 Client 无此参数不影响
      */
     public function produceFnf(
         string $cluster,
@@ -101,9 +103,10 @@ final class SwowClient implements ClientInterface
         ?array $headers = null,
         ?int $partition = null,
         ?int $timestampMs = null,
+        ?int $timeoutMs = null,
     ): void {
         $frame = \hi_kafka_encode_fnf_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
-        $timeoutMs = 5000;
+        $timeoutMs ??= 5000;
         $conn = $this->acquire();
 
         try {
@@ -150,7 +153,7 @@ final class SwowClient implements ClientInterface
         ?int $timeoutMs = null,
     ): array {
         $timeoutMs ??= 5000;
-        $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs);
+        $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs, $timeoutMs);
         $cid = $encoded['cid'];
         $frame = $encoded['frame'];
 
@@ -576,13 +579,12 @@ final class SwowClient implements ClientInterface
     private function handshake(Socket $conn): void
     {
         $frame = \hi_kafka_encode_hello_frame();
-        $timeoutMs = 2000;
+        // 复用 connectTimeoutMs——connect 与 handshake 语义同属"建链耗时"，共用同一预算。
+        // -1（不超时）时给 2s 保底，避免 handshake 卡住整个 driver。
+        $timeoutMs = $this->connectTimeoutMs > 0 ? $this->connectTimeoutMs : 2000;
         $conn->sendString($frame, $timeoutMs);
-        // HELLO RESP 固定 14B
+        // Swow recvStringData 精确读满 14 B，否则抛 SocketException；无需 strlen 兜底
         $resp = $conn->recvStringData(14, $timeoutMs);
-        if (\mb_strlen($resp) < 14) {
-            throw new \RuntimeException('recv HELLO RESP short read');
-        }
         \hi_kafka_verify_hello_resp($resp);
     }
 
@@ -619,13 +621,20 @@ final class SwowClient implements ClientInterface
 
     private function assertExtension(): void
     {
-        if (! \function_exists('hi_kafka_encode_fnf_frame')
-            || ! \function_exists('hi_kafka_encode_subscribe_frame')
-            || ! \function_exists('hi_kafka_decode_consumer_resp')
-        ) {
-            throw new \RuntimeException(
-                'hi_kafka extension with producer+consumer protocol helpers is required',
-            );
+        // 构造函数下一行就要调 hi_kafka_error_frame_kind()；显式列出全部构造期依赖，
+        // 让缺失时报错落到清晰的 RuntimeException 而不是 undefined function fatal。
+        $required = [
+            'hi_kafka_encode_fnf_frame',
+            'hi_kafka_encode_subscribe_frame',
+            'hi_kafka_decode_consumer_resp',
+            'hi_kafka_error_frame_kind',
+        ];
+        foreach ($required as $fn) {
+            if (! \function_exists($fn)) {
+                throw new \RuntimeException(
+                    "hi_kafka extension missing required function '{$fn}' (version skew?)",
+                );
+            }
         }
         if (! \extension_loaded('swow')) {
             throw new \RuntimeException('swow extension is required for SwowClient');
