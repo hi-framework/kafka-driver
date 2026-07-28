@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Hi\Kafka;
 
+use Hi\Kafka\Internal\KafkaExceptionFactory;
 use Swow\Socket;
 use Swow\SocketException;
 
@@ -15,6 +16,7 @@ use Swow\SocketException;
  * - 用 `Swow\Socket` 做 UDS 通信，所有 IO 走 Swow 调度器
  * - 用 `SplQueue` 做协程感知连接池（Swow 协程协作式调度，无需线程安全队列）
  * - 协议编解码复用扩展暴露的 `hi_kafka_*` 全局函数，**协议逻辑单源**
+ * - 连接池仅服务短生命周期 RPC；Consumer 始终使用不入池的独占 stream connection
  *
  * 仅在 Swow 协程上下文中使用。非协程或 Swoole 上下文用 `SwooleClient` / `Client`。
  *
@@ -28,7 +30,7 @@ use Swow\SocketException;
  *     $client = new SwowClient('/tmp/hi-kafka.sock');
  *     $client->registerCluster('default', ['bootstrap.servers' => '127.0.0.1:9094']);
  *     $client->produceFnf('default', 'topic', 'k', 'v');
- *     $r = $client->produceSync('default', 'topic', 'k', 'v', 5000);
+ *     $r = $client->produceSync('default', 'topic', 'k', 'v', timeoutMs: 5000);
  *     // $r => ['ok' => true, 'cid' => int, 'partition' => 0, 'offset' => 42]
  * });
  * ```
@@ -49,12 +51,14 @@ final class SwowClient implements ClientInterface
     private int $errorFrameKind = 0;
 
     /**
+     * 初始化 Swow RPC 连接池，并验证当前扩展提供 driver 所需的协议函数。
+     *
      * @param string $socket           Worker UDS 路径
      * @param int    $maxIdle          池容量上限（多余的归还时直接 close）
      * @param int    $connectTimeoutMs 建链超时（毫秒）；-1 = 不超时
      */
     public function __construct(
-        private readonly string $socket = '/tmp/hi-kafka.sock',
+        private readonly string $socket = '/tmp/hi-kafka-v2.sock',
         private readonly int $maxIdle = 16,
         private readonly int $connectTimeoutMs = 1000,
     ) {
@@ -75,19 +79,25 @@ final class SwowClient implements ClientInterface
                 try {
                     $conn->close();
                 } catch (\Throwable) {
-                    // ignore close errors at GC time
+                    // GC 阶段忽略连接关闭错误
                 }
             }
         }
     }
 
+    /**
+     * 析构时尽力释放所有空闲 RPC 连接，关闭异常由 close() 吞掉。
+     */
     public function __destruct()
     {
         $this->close();
     }
 
     /**
-     * Fire-and-forget 生产。立即返回，不等 ack。
+     * 把消息提交到 worker 本地生产队列，不等待 broker delivery report。
+     *
+     * 方法仍读取 worker 的本地 enqueue ack，因此集群不存在、队列已满等同步错误会
+     * 立即抛出；成功不代表 broker 已持久化消息。
      *
      * @param array<string,string>|null $headers     Kafka 消息头
      * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner（key hash）
@@ -110,15 +120,15 @@ final class SwowClient implements ClientInterface
         $conn = $this->acquire();
 
         try {
-            $conn->sendString($frame, $timeoutMs);
+            $this->sendAll($conn, $frame, $timeoutMs);
             // FNF 分层：读 worker 本地 enqueue ack。cluster 不存在 / 队列满等同步可知
             // 错误会以 Error 帧回来 → KafkaException；不等 broker delivery。
             $headerLen = \hi_kafka_header_len();
-            $header = $conn->recvStringData($headerLen, $timeoutMs);
+            $header = $this->receiveExactly($conn, $headerLen, $timeoutMs);
             $parsed = \hi_kafka_parse_header($header);
             $payloadLen = $parsed['payload_len'];
             $payload = $payloadLen > 0
-                ? $conn->recvStringData($payloadLen, $timeoutMs)
+                ? $this->receiveExactly($conn, $payloadLen, $timeoutMs)
                 : '';
             $this->release($conn);
             if ($parsed['kind'] === $this->errorFrameKind) {
@@ -133,14 +143,14 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 同步生产，等 broker ack。
+     * 生产消息并等待 broker delivery report，响应 cid 必须与请求一致。
      *
-     * 返回：
-     *  - 成功：['ok' => true, 'cid' => int, 'partition' => int, 'offset' => int]
-     *  - 失败：['ok' => false, 'cid' => int, 'code' => int, 'message' => string, 'retryable' => bool]
+     * @param array<string,string>|null $headers     Kafka 消息头
+     * @param int|null                  $partition   明确写入分区；null = librdkafka partitioner
+     * @param int|null                  $timestampMs 消息时间戳（毫秒）
+     * @param int|null                  $timeoutMs   单次 IPC IO 超时（毫秒），不是整次操作总预算
      *
-     * @param int                       $timeoutMs 单次 IO 操作超时（不是总耗时）
-     * @param array<string,string>|null $headers
+     * @return array<string,mixed> 解码后的 broker delivery 结果
      */
     public function produceSync(
         string $cluster,
@@ -160,10 +170,10 @@ final class SwowClient implements ClientInterface
         $conn = $this->acquire();
 
         try {
-            $conn->sendString($frame, $timeoutMs);
+            $this->sendAll($conn, $frame, $timeoutMs);
 
             $headerLen = \hi_kafka_header_len();
-            $header = $conn->recvStringData($headerLen, $timeoutMs);
+            $header = $this->receiveExactly($conn, $headerLen, $timeoutMs);
             $parsed = \hi_kafka_parse_header($header);
             if ($parsed['cid'] !== $cid) {
                 throw new \RuntimeException("cid mismatch: sent {$cid}, got {$parsed['cid']}");
@@ -171,7 +181,7 @@ final class SwowClient implements ClientInterface
 
             $payloadLen = $parsed['payload_len'];
             $payload = $payloadLen > 0
-                ? $conn->recvStringData($payloadLen, $timeoutMs)
+                ? $this->receiveExactly($conn, $payloadLen, $timeoutMs)
                 : '';
 
             $this->release($conn);
@@ -188,9 +198,9 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 注册或覆盖一个 Kafka 集群。`$config` 须含 `bootstrap.servers`。
+     * 通过普通 RPC 连接在 worker 中注册或覆盖一个 Kafka 集群。
      *
-     * @param array<string,string> $config
+     * @param array<string,string> $config librdkafka 配置，必须包含 `bootstrap.servers`
      */
     public function registerCluster(string $cluster, array $config, ?int $timeoutMs = null): void
     {
@@ -202,218 +212,28 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 订阅 topics，返回 subscription_id。
+     * 打开一条不进入 RPC 连接池的独占 protocol-v2 Consumer stream。
      *
-     * @param string[]                  $topics
-     * @param array<string,string>|null $config consumer 级配置（auto.offset.reset 等）
+     * @param list<string>              $topics
+     * @param array<string,string>|null $config
      */
-    public function subscribe(
-        string $cluster,
-        string $groupId,
-        array $topics,
-        ?array $config = null,
-        ?int $timeoutMs = null,
-    ): int {
-        $encoded = \hi_kafka_encode_subscribe_frame($cluster, $groupId, $topics, $config ?? []);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("subscribe failed: {$resp['message']}");
-        }
-        $id = $resp['subscription_id'];
-        // 登记订阅 → 进程退出(MSHUTDOWN)时扩展主动 unsubscribe + Goodbye，让 worker 亚秒自退。
-        // 协程 driver 订阅不进 Rust 注册表，不登记则消费者进程退出后 worker 要干等 idle 超时。
-        if (\function_exists('hi_kafka_track_subscription')) {
-            \hi_kafka_track_subscription($id, $this->socket);
-        }
-        return $id;
-    }
-
-    /**
-     * 拉一批消息。
-     *
-     * @return array<int, array{topic:string,partition:int,offset:int,timestamp_ms:int,key:string,value:string,headers:array<string,string>}>
-     */
-    public function poll(int $subscriptionId, int $maxMessages, int $timeoutMs): array
+    public function consume(string $cluster, string $groupId, array $topics, ?array $config = null): ConsumerStreamInterface
     {
-        $encoded = \hi_kafka_encode_poll_frame($subscriptionId, $maxMessages, $timeoutMs);
-        // IPC 超时 = 业务超时 + 2s 安全裕度
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs + 2000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("poll failed: {$resp['message']}");
-        }
-        return $resp['messages'];
-    }
-
-    /**
-     * 同步提交 offset。
-     */
-    public function commit(int $subscriptionId, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_commit_frame($subscriptionId);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("commit failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * 退订（fire-and-forget，不等响应）。
-     */
-    public function unsubscribe(int $subscriptionId): void
-    {
-        // 注销订阅登记，避免 MSHUTDOWN 重复 unsubscribe 已退订的订阅。
-        if (\function_exists('hi_kafka_untrack_subscription')) {
-            \hi_kafka_untrack_subscription($subscriptionId, $this->socket);
-        }
-        $frame = \hi_kafka_encode_unsubscribe_frame($subscriptionId);
-        $conn = $this->acquire();
-
-        try {
-            $conn->sendString($frame);
-            $this->release($conn);
-        } catch (\Throwable $e) {
-            $this->safeClose($conn);
-            throw $e;
-        }
-    }
-
-    // === Phase 3.x methods ====================================================
-
-    /**
-     * 暂停一组分区的 fetch（不丢分区分配，不触发 rebalance）。空数组 = 当前 assignment 全部。
-     *
-     * @param string[] $topics
-     * @param int[]    $partitions
-     */
-    public function pause(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_pause_resume_frame($subscriptionId, 0, $topics, $partitions);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("pause failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * 恢复被 pause 暂停的分区。
-     *
-     * @param string[] $topics
-     * @param int[]    $partitions
-     */
-    public function resume(int $subscriptionId, array $topics, array $partitions, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_pause_resume_frame($subscriptionId, 1, $topics, $partitions);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("resume failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * 按 offset seek。必须在订阅已 ASSIGN 后调。三个平行数组同长度。
-     *
-     * @param string[] $topics
-     * @param int[]    $partitions
-     * @param int[]    $offsets
-     */
-    public function seek(int $subscriptionId, array $topics, array $partitions, array $offsets, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_seek_by_offset_frame($subscriptionId, $topics, $partitions, $offsets);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 10000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("seek failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * 按时间戳 seek。$topics/$partitions 均空 = 应用到当前 assignment 全部分区。
-     *
-     * @param string[] $topics
-     * @param int[]    $partitions
-     */
-    public function seekToTimestamp(
-        int $subscriptionId,
-        int $timestampMs,
-        array $topics,
-        array $partitions,
-        ?int $timeoutMs = null,
-    ): void {
-        $encoded = \hi_kafka_encode_seek_by_timestamp_frame(
-            $subscriptionId,
-            $timestampMs,
-            $topics,
-            $partitions,
-        );
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 15000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("seekToTimestamp failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * 开启事务。集群配置必须含 `transactional.id`。
-     */
-    public function beginTransaction(string $cluster, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_txn_frame($cluster, 0);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("beginTransaction failed: {$resp['message']}");
-        }
-    }
-
-    public function commitTransaction(string $cluster, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_txn_frame($cluster, 1);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("commitTransaction failed: {$resp['message']}");
-        }
-    }
-
-    public function abortTransaction(string $cluster, ?int $timeoutMs = null): void
-    {
-        $encoded = \hi_kafka_encode_txn_frame($cluster, 2);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("abortTransaction failed: {$resp['message']}");
-        }
-    }
-
-    /**
-     * EOS：把 consumer offsets 提交进当前 producer 事务。
-     *
-     * @param string[] $topics
-     * @param int[]    $partitions
-     * @param int[]    $offsets
-     */
-    public function sendOffsetsToTransaction(
-        string $producerCluster,
-        int $subscriptionId,
-        string $groupId,
-        array $topics,
-        array $partitions,
-        array $offsets,
-        ?int $timeoutMs = null,
-    ): void {
-        $encoded = \hi_kafka_encode_send_offsets_frame(
-            $producerCluster,
-            $subscriptionId,
+        return new CoroutineConsumerStream(
+            $this->socket,
+            new SwowConsumerTransport,
+            $cluster,
             $groupId,
             $topics,
-            $partitions,
-            $offsets,
+            $config ?? [],
+            connectTimeoutMs: $this->connectTimeoutMs,
         );
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs ?? 30000);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("sendOffsetsToTransaction failed: {$resp['message']}");
-        }
     }
 
     /**
-     * 推 SASL/OAUTHBEARER token 给指定 cluster。
+     * 通过普通 RPC 连接向 worker 更新指定集群的 SASL/OAUTHBEARER token。
      *
-     * @param array<string,string> $extensions
+     * @param array<string,string>|null $extensions OAUTHBEARER 扩展字段
      */
     public function setOAuthBearerToken(
         string $cluster,
@@ -437,22 +257,7 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 拉取 rebalance 事件队列。
-     *
-     * @return list<array{type:string, partitions?:list<array{topic:string,partition:int}>, message?:string}>
-     */
-    public function pollRebalanceEvents(int $subscriptionId, ?int $maxEvents = null, ?int $timeoutMs = null): array
-    {
-        $encoded = \hi_kafka_encode_poll_rebalance_frame($subscriptionId, $maxEvents ?? 100);
-        $resp = $this->roundTrip($encoded['cid'], $encoded['frame'], $timeoutMs);
-        if (! $resp['ok']) {
-            throw new \RuntimeException("pollRebalanceEvents failed: {$resp['message']}");
-        }
-        return $resp['events'] ?? [];
-    }
-
-    /**
-     * 池统计。供监控/排障使用。
+     * 返回当前进程内 RPC 连接池统计，供监控与排障使用。
      *
      * @return array{socket:string,max_idle:int,idle:int,created:int}
      */
@@ -467,7 +272,9 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 显式触发 worker fork（一般不需要——首次 produce/subscribe 会自动触发）。
+     * 显式确保 worker 已启动；同一客户端实例只调用一次扩展 ensure。
+     *
+     * 通常无需手动调用，因为首次新建 RPC 连接或 Consumer stream 时也会 ensure。
      */
     public function ensureWorker(): void
     {
@@ -478,8 +285,10 @@ final class SwowClient implements ClientInterface
     }
 
     /**
-     * 通用「发请求→读 13B header→按 cid 校验→读 payload→解析」。
-     * 适用于所有 consumer req/resp 帧。
+     * 在可复用 RPC 连接上完成「写请求、读 header、校验 cid、读 payload、解码响应」。
+     *
+     * 协议或业务 Error 会在连接安全归还池后转换为 KafkaException；传输或帧错误会
+     * 关闭连接，防止污染后续请求。
      *
      * @return array<string,mixed>
      */
@@ -489,10 +298,10 @@ final class SwowClient implements ClientInterface
         $conn = $this->acquire();
 
         try {
-            $conn->sendString($frame, $timeoutMs);
+            $this->sendAll($conn, $frame, $timeoutMs);
 
             $headerLen = \hi_kafka_header_len();
-            $header = $conn->recvStringData($headerLen, $timeoutMs);
+            $header = $this->receiveExactly($conn, $headerLen, $timeoutMs);
             $parsed = \hi_kafka_parse_header($header);
             if ($parsed['cid'] !== $cid) {
                 throw new \RuntimeException("cid mismatch: sent {$cid}, got {$parsed['cid']}");
@@ -500,14 +309,14 @@ final class SwowClient implements ClientInterface
 
             $payloadLen = $parsed['payload_len'];
             $payload = $payloadLen > 0
-                ? $conn->recvStringData($payloadLen, $timeoutMs)
+                ? $this->receiveExactly($conn, $payloadLen, $timeoutMs)
                 : '';
 
             $this->release($conn);
             if ($parsed['kind'] === $this->errorFrameKind) {
                 throw $this->makeKafka($header, $payload);
             }
-            return \hi_kafka_decode_consumer_resp($header . $payload);
+            return \hi_kafka_decode_control_resp($header . $payload);
         } catch (KafkaException $ke) {
             throw $ke;
         } catch (\Throwable $e) {
@@ -516,6 +325,9 @@ final class SwowClient implements ClientInterface
         }
     }
 
+    /**
+     * 从池中取得一条仍可用的 RPC 连接；没有可用空闲连接时新建并握手。
+     */
     private function acquire(): Socket
     {
         // Swow 协程协作式调度：单进程内 SplQueue 操作是原子的（没有抢占）。
@@ -531,6 +343,9 @@ final class SwowClient implements ClientInterface
         return $this->newConn();
     }
 
+    /**
+     * 将健康 RPC 连接归还池；超过容量上限时直接关闭。
+     */
     private function release(Socket $conn): void
     {
         if ($this->idleConns->count() >= $this->maxIdle) {
@@ -540,6 +355,9 @@ final class SwowClient implements ClientInterface
         $this->idleConns->enqueue($conn);
     }
 
+    /**
+     * 确保 worker 已启动，创建 UDS 连接并完成 HELLO 后计入本进程创建数。
+     */
     private function newConn(): Socket
     {
         // 首次连接前确保 worker 已 fork 起来（扩展层 flock + double-fork 互斥）
@@ -551,7 +369,7 @@ final class SwowClient implements ClientInterface
         $conn = new Socket(Socket::TYPE_UNIX);
 
         try {
-            $conn->connect($this->socket, 0, $this->connectTimeoutMs);
+            $conn->connect($this->socket, 0, $this->microseconds($this->connectTimeoutMs));
         } catch (SocketException $e) {
             $this->safeClose($conn);
             throw new \RuntimeException(
@@ -576,18 +394,51 @@ final class SwowClient implements ClientInterface
         return $conn;
     }
 
+    /**
+     * 在新 RPC 连接上完成有界 HELLO 握手并校验 protocol major。
+     */
     private function handshake(Socket $conn): void
     {
         $frame = \hi_kafka_encode_hello_frame();
         // 复用 connectTimeoutMs——connect 与 handshake 语义同属"建链耗时"，共用同一预算。
         // -1（不超时）时给 2s 保底，避免 handshake 卡住整个 driver。
         $timeoutMs = $this->connectTimeoutMs > 0 ? $this->connectTimeoutMs : 2000;
-        $conn->sendString($frame, $timeoutMs);
-        // Swow recvStringData 精确读满 14 B，否则抛 SocketException；无需 strlen 兜底
-        $resp = $conn->recvStringData(14, $timeoutMs);
-        \hi_kafka_verify_hello_resp($resp);
+        $this->sendAll($conn, $frame, $timeoutMs);
+        $header = $this->receiveExactly($conn, \hi_kafka_header_len(), $timeoutMs);
+        $parsed = \hi_kafka_parse_header($header);
+        $payload = $parsed['payload_len'] > 0
+            ? $this->receiveExactly($conn, $parsed['payload_len'], $timeoutMs)
+            : '';
+        \hi_kafka_verify_hello_resp($header . $payload);
     }
 
+    /**
+     * 使用 Swow 的完整发送语义，在指定毫秒超时内写完全部字节。
+     */
+    private function sendAll(Socket $conn, string $data, int $timeoutMs): void
+    {
+        $conn->send($data, 0, -1, $this->microseconds($timeoutMs));
+    }
+
+    /**
+     * 在指定毫秒超时内读取精确长度的字节串。
+     */
+    private function receiveExactly(Socket $conn, int $length, int $timeoutMs): string
+    {
+        return $conn->readString($length, $this->microseconds($timeoutMs));
+    }
+
+    /**
+     * 把统一毫秒超时转换为 Swow 微秒；负数保持“不超时”语义。
+     */
+    private function microseconds(int $milliseconds): int
+    {
+        return $milliseconds < 0 ? -1 : $milliseconds * 1000;
+    }
+
+    /**
+     * 尽力关闭可选连接，并吞掉清理路径上的关闭异常。
+     */
     private function safeClose(?Socket $conn): void
     {
         if (null === $conn) {
@@ -597,7 +448,7 @@ final class SwowClient implements ClientInterface
         try {
             $conn->close();
         } catch (\Throwable) {
-            // ignore close errors
+            // 忽略连接关闭错误
         }
     }
 
@@ -606,27 +457,20 @@ final class SwowClient implements ClientInterface
      */
     private function makeKafka(string $header, string $payload): KafkaException
     {
-        $err = \hi_kafka_decode_error_frame($header . $payload);
-
-        // 2 参构造走（继承的）\Exception::__construct(message, code) → 经 create_object 捕获调用栈；
-        // 分类信息（kind/kind_name/retryable/native_code）构造后写入公开属性。
-        $e = new KafkaException((string) $err['message'], (int) $err['kind']);
-        $e->kind = (int) $err['kind'];
-        $e->kind_name = (string) $err['kind_name'];
-        $e->retryable = (bool) $err['retryable'];
-        $e->native_code = (int) $err['native_code'];
-
-        return $e;
+        return KafkaExceptionFactory::fromDecoded(\hi_kafka_decode_error_frame($header . $payload));
     }
 
+    /**
+     * 在构造阶段验证 Swow 运行时和所需 ext-kafka 协议函数，提前暴露版本错配。
+     */
     private function assertExtension(): void
     {
         // 构造函数下一行就要调 hi_kafka_error_frame_kind()；显式列出全部构造期依赖，
         // 让缺失时报错落到清晰的 RuntimeException 而不是 undefined function fatal。
         $required = [
             'hi_kafka_encode_fnf_frame',
-            'hi_kafka_encode_subscribe_frame',
-            'hi_kafka_decode_consumer_resp',
+            'hi_kafka_encode_consume_open_frame',
+            'hi_kafka_decode_control_resp',
             'hi_kafka_error_frame_kind',
         ];
         foreach ($required as $fn) {
