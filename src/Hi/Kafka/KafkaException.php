@@ -32,6 +32,7 @@ if (! \class_exists(KafkaException::class, false)) {
         public int $kind = 0;
         public string $kind_name = 'INTERNAL';
         public bool $retryable = false;
+        public string $outcome = 'not_applied';
         public int $native_code = 0;
 
         /**
@@ -56,6 +57,14 @@ if (! \class_exists(KafkaException::class, false)) {
         public function isRetryable(): bool
         {
             return $this->retryable;
+        }
+
+        /**
+         * 返回操作结果确定性：未执行、已执行或结果未知。
+         */
+        public function getOutcome(): string
+        {
+            return $this->outcome;
         }
 
         /**
