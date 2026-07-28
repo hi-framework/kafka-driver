@@ -6,6 +6,10 @@
     "require": {
         "php": ">=8.2"
     },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5",
+        "friendsofphp/php-cs-fixer": "^3.95"
+    },
     "suggest": {
         "ext-hi-kafka": "Real runtime implementation; without it, Client falls back to no-op stubs (IDE / CI only)",
         "ext-swoole": "Required for Hi\\Kafka\\SwooleClient",
@@ -18,5 +22,13 @@
         "files": [
             "stubs/hi_kafka_functions.php"
         ]
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hi\\Kafka\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit tests"
     }
 }
