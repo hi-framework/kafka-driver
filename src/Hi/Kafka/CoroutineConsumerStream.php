@@ -125,6 +125,12 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
                 }
                 $this->reconnect();
                 continue;
+            } catch (KafkaException $error) {
+                if (! $error->retryable) {
+                    throw $error;
+                }
+                $this->reconnect();
+                continue;
             }
 
             if ('message' === $decoded['kind']) {
@@ -428,7 +434,10 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
                     $this->openFresh();
                     return;
                 }
-                if (self::ERROR_STALE_EPOCH !== $error->kind || \microtime(true) >= $deadline) {
+                if (
+                    (self::ERROR_STALE_EPOCH !== $error->kind && ! $error->retryable)
+                    || \microtime(true) >= $deadline
+                ) {
                     throw $error;
                 }
             } catch (ConsumerTransportException $error) {
