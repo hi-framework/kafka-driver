@@ -93,6 +93,34 @@ final class CoroutineConsumerStreamTest extends TestCase
         self::assertSame('FLOW:7:1:1:512', $transport->sent[2]);
     }
 
+    public function testRetryableWorkerErrorReconnectsAndContinues(): void
+    {
+        $protocol = new FakeConsumerProtocol;
+        $transport = new FakeConsumerTransport([
+            $protocol->wire(['kind' => 'hello'])
+            . $protocol->wire($this->ready(), cid: 10)
+            . $protocol->wire([
+                'kind' => 20,
+                'kind_name' => 'BROKER_RETRYABLE',
+                'retryable' => true,
+                'outcome' => 'not_applied',
+                'native_code' => -195,
+                'message' => 'Message consumption error: Broker transport failure',
+            ], kind: 99),
+            $protocol->wire(['kind' => 'hello'])
+            . $protocol->wire($this->ready(), cid: 11)
+            . $protocol->wire($this->message(41, 128)),
+        ]);
+        $worker = new FakeConsumerWorker;
+        $stream = $this->stream($transport, $protocol, $worker);
+
+        self::assertSame(41, $stream->next(100)?->deliveryId());
+        self::assertSame(2, $transport->connectCalls);
+        self::assertSame(2, $worker->ensureCalls);
+        self::assertSame('RESUME:7:1', $transport->sent[4]);
+        self::assertSame('FLOW:7:1:1:1024', $transport->sent[5]);
+    }
+
     private function stream(
         FakeConsumerTransport $transport,
         FakeConsumerProtocol $protocol,
@@ -160,9 +188,16 @@ final class FakeConsumerTransport implements ConsumerTransportInterface
     public array $sent = [];
     public int $connectCalls = 0;
     private bool $connected = false;
+    private string $incoming = '';
 
-    public function __construct(private string $incoming)
+    /**
+     * @param string|list<string> $incoming
+     */
+    public function __construct(private string|array $connections)
     {
+        if (\is_string($this->connections)) {
+            $this->connections = [$this->connections];
+        }
     }
 
     public function append(string $bytes): void
@@ -174,6 +209,7 @@ final class FakeConsumerTransport implements ConsumerTransportInterface
     {
         ++$this->connectCalls;
         $this->connected = true;
+        $this->incoming = \array_shift($this->connections) ?? '';
     }
 
     public function sendAll(string $data, int $timeoutMs): void
@@ -197,6 +233,7 @@ final class FakeConsumerTransport implements ConsumerTransportInterface
     public function close(): void
     {
         $this->connected = false;
+        $this->incoming = '';
     }
 
     public function sleep(int $milliseconds): void
@@ -262,7 +299,11 @@ final class FakeConsumerProtocol implements ConsumerProtocolInterface
 
     public function decodeErrorFrame(string $frame): array
     {
-        return ['kind' => 1, 'kind_name' => 'TEST', 'retryable' => false, 'outcome' => 'not_applied', 'native_code' => 0, 'message' => 'test'];
+        return \json_decode(
+            \substr($frame, self::HEADER_LENGTH),
+            true,
+            flags: \JSON_THROW_ON_ERROR,
+        );
     }
 
     public function open(string $cluster, string $groupId, array $topics, array $config, int $maxMessages, int $maxBytes): ConsumerRequest
