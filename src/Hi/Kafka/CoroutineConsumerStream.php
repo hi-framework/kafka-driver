@@ -147,9 +147,10 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
                 continue;
             }
             if ('close' === $decoded['kind']) {
-                $this->state->close();
-                $this->disconnect();
-                throw new \RuntimeException('consumer stream closed by worker');
+                // worker 进入 drain（滚动发布、空闲自退、SIGTERM）。这不是业务关闭：
+                // 在新 worker 上恢复或重新打开订阅，未 ACK 的消息照常重投。
+                $this->reconnect();
+                continue;
             }
             $kind = (string) ($decoded['kind'] ?? 'unknown');
             throw new \RuntimeException("unexpected consumer stream event '{$kind}'");
