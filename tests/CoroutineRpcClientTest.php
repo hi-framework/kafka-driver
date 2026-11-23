@@ -15,9 +15,13 @@ final class CoroutineRpcClientTest extends TestCase
 {
     private FakeConsumerProtocol $protocol;
     private FakeConsumerWorker $worker;
-    /** @var list<ScriptedRpcTransport> */
+    /**
+     * @var list<ScriptedRpcTransport>
+     */
     private array $transports = [];
-    /** @var list<list<string>> */
+    /**
+     * @var list<list<string>>
+     */
     private array $scripts = [];
 
     protected function setUp(): void
@@ -50,7 +54,7 @@ final class CoroutineRpcClientTest extends TestCase
         $client->call($this->request(1), 100);
 
         $cid = 2;
-        $raw = $client->call(function () use (&$cid): ConsumerRequest {
+        $raw = $client->call(static function () use (&$cid): ConsumerRequest {
             $request = new ConsumerRequest($cid, "REQ:{$cid}");
             ++$cid;
             return $request;
@@ -192,7 +196,9 @@ final class ScriptedRpcTransport implements ConsumerTransportInterface
 {
     public const EOF = "\0EOF";
 
-    /** @var list<string> */
+    /**
+     * @var list<string>
+     */
     public array $sent = [];
 
     /**

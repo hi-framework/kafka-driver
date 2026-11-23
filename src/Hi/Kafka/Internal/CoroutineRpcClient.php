@@ -28,7 +28,9 @@ final class CoroutineRpcClient
     private const ERROR_CLUSTER_NOT_REGISTERED = 5;
     private const HANDSHAKE_TIMEOUT_MS = 2000;
 
-    /** @var list<array{0:ConsumerTransportInterface,1:ConsumerFrameReader}> */
+    /**
+     * @var list<array{0:ConsumerTransportInterface,1:ConsumerFrameReader}>
+     */
     private array $idle = [];
     private int $ownerPid;
     private int $created = 0;
@@ -67,6 +69,7 @@ final class CoroutineRpcClient
         $replayed = false;
         for (;;) {
             $request = $encode();
+
             try {
                 return $this->roundTrip($request, $timeoutMs);
             } catch (ConsumerTransportException $error) {

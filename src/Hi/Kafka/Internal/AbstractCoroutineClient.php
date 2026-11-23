@@ -114,7 +114,7 @@ abstract class AbstractCoroutineClient implements ClientInterface
         ?int $timeoutMs = null,
     ): array {
         $timeoutMs ??= self::DEFAULT_TIMEOUT_MS;
-        $raw = $this->rpc->call(function () use ($cluster, $topic, $key, $value, $headers, $partition, $timestampMs, $timeoutMs): ConsumerRequest {
+        $raw = $this->rpc->call(static function () use ($cluster, $topic, $key, $value, $headers, $partition, $timestampMs, $timeoutMs): ConsumerRequest {
             $encoded = \hi_kafka_encode_req_frame($cluster, $topic, $key, $value, $headers, $partition, $timestampMs, $timeoutMs);
             return new ConsumerRequest($encoded['cid'], $encoded['frame']);
         }, $this->ipcTimeout($timeoutMs));

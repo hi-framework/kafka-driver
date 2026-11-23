@@ -174,9 +174,13 @@ final class FakeConsumerWorker implements ConsumerWorkerInterface
 {
     public int $ensureCalls = 0;
     public int $replayCalls = 0;
-    /** @var array<string,array<string,string>> */
+    /**
+     * @var array<string,array<string,string>>
+     */
     public array $clusters = [];
-    /** @var array<string,string> */
+    /**
+     * @var array<string,string>
+     */
     public array $tokens = [];
 
     public function ensure(string $socket): void
