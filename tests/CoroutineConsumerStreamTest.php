@@ -121,6 +121,30 @@ final class CoroutineConsumerStreamTest extends TestCase
         self::assertSame('FLOW:7:1:1:1024', $transport->sent[5]);
     }
 
+    /**
+     * next() 超时返回 null 时开出的 credit 仍在 worker 侧；消息在 commit 等待 Committed
+     * 期间到达时必须暂存并由下一次 next() 返回，而不是被丢弃（丢弃会让单消息窗口永久停摆）。
+     */
+    public function testMessageArrivingDuringCommitIsDeliveredByNextCall(): void
+    {
+        $protocol = new FakeConsumerProtocol;
+        $transport = new FakeConsumerTransport(
+            $protocol->wire(['kind' => 'hello']) . $protocol->wire($this->ready(), cid: 10),
+        );
+        $stream = $this->stream($transport, $protocol, new FakeConsumerWorker);
+        self::assertNull($stream->next(1), 'idle read leaves the window open');
+
+        $transport->append($protocol->wire($this->message(31, 64)));
+        $transport->append($protocol->wire(['kind' => 'committed', 'subscription_id' => 7, 'epoch' => 1], cid: 12));
+        $stream->commit(100);
+
+        $sentBefore = \count($transport->sent);
+        $message = $stream->next(1);
+        self::assertSame(31, $message?->deliveryId());
+        self::assertCount($sentBefore, $transport->sent, 'the stashed delivery needs no further IO');
+        $stream->ack($message);
+    }
+
     private function stream(
         FakeConsumerTransport $transport,
         FakeConsumerProtocol $protocol,

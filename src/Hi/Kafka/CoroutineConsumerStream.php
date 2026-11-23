@@ -37,6 +37,12 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
     private readonly ConsumerFrameReader $frames;
     private readonly ConsumerStreamState $state;
     private int $negotiatedByteCredit;
+    /**
+     * commit 等待响应期间到达的消息。next() 超时返回 null 时开出的 credit 仍在 worker
+     * 侧，消息随时可能到达；暂存后由下一次 next() 交给业务。丢弃它会让 worker 认为已
+     * 投递，单消息窗口从此不再补充，消费者永久停摆。
+     */
+    private ?ConsumerRecord $prefetched = null;
 
     /**
      * 启动或确认 worker、建立独占连接并立即创建新的 subscription。
@@ -87,6 +93,12 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
     public function next(?int $timeoutMs = null): ?ConsumerRecord
     {
         $this->state->assertCanRead();
+        if (null !== $this->prefetched) {
+            $message = $this->prefetched;
+            $this->prefetched = null;
+            $this->state->acceptMessage($message);
+            return $message;
+        }
 
         $timeoutMs ??= 30000;
         $this->assertTimeout($timeoutMs);
@@ -208,6 +220,12 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
                 $decoded = $this->decode($frame);
                 if (($decoded['kind'] ?? null) === 'assign' || ($decoded['kind'] ?? null) === 'revoke') {
                     $this->acceptEpoch($decoded);
+                } elseif (($decoded['kind'] ?? null) === 'message') {
+                    $message = $decoded['message'];
+                    if (! $message instanceof ConsumerRecord || null !== $this->prefetched) {
+                        throw new \RuntimeException('unexpected ConsumeMessage while committing');
+                    }
+                    $this->prefetched = $message;
                 }
             } while (($decoded['kind'] ?? null) !== 'committed');
         } catch (ConsumerTransportException $error) {
@@ -503,6 +521,10 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
      */
     private function acceptEpoch(array $notice): void
     {
+        // 新 epoch 使暂存的投递失效，worker 会从最早未 ACK 位置重投。
+        if ((int) ($notice['epoch'] ?? 0) !== $this->state->epoch()) {
+            $this->prefetched = null;
+        }
         // epoch 变化会同时废止未确认投递与本地延迟 ACK；此后只有 worker 的水位可信。
         $this->state->acceptEpoch(
             (int) ($notice['subscription_id'] ?? 0),
@@ -516,6 +538,8 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
      */
     private function disconnect(): void
     {
+        // 连接世代结束：暂存的投递属于旧 epoch，重连后由 worker 重投。
+        $this->prefetched = null;
         $this->frames->reset();
         $this->transport->close();
     }
