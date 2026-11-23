@@ -18,6 +18,16 @@ if (! \function_exists('hi_kafka_version')) {
     function hi_kafka_register_cluster(string $cluster, array $config, ?string $socket = null, ?int $timeoutMs = null): void
     {
     }
+    function hi_kafka_remember_cluster(string $cluster, array $config, ?string $socket = null): void
+    {
+    }
+    function hi_kafka_remember_oauth_token(string $cluster, string $token, int $lifetimeMs, string $principalName, ?array $extensions = null, ?string $socket = null): void
+    {
+    }
+    function hi_kafka_replay_clusters(?string $socket = null): void
+    {
+        throw new \RuntimeException('hi-kafka extension is not loaded');
+    }
     function hi_kafka_header_len(): int
     {
         return 13;

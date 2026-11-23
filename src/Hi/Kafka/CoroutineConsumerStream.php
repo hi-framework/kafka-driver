@@ -29,6 +29,7 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
     private const CONTROL_TIMEOUT_MS = 5000;
     private const CLOSE_TIMEOUT_MS = 1000;
     private const HELLO_TIMEOUT_MS = 2000;
+    private const ERROR_CLUSTER_NOT_REGISTERED = 5;
     private const ERROR_SUBSCRIPTION_NOT_FOUND = 6;
     private const ERROR_STALE_EPOCH = 7;
     private readonly ConsumerProtocolInterface $protocol;
@@ -390,6 +391,26 @@ final class CoroutineConsumerStream implements ConsumerStreamInterface
      * 发送 ConsumeOpen 并安装 worker 返回的全新 subscription 身份与协商额度。
      */
     private function openFresh(): void
+    {
+        try {
+            $this->sendOpen();
+        } catch (KafkaException $error) {
+            if (self::ERROR_CLUSTER_NOT_REGISTERED !== $error->kind) {
+                throw $error;
+            }
+            // worker 被其它进程重启过，本进程的集群不在新 worker 中。worker 在拒绝
+            // ConsumeOpen 后会关闭这条 stream，重放后必须在新连接上重新打开。
+            $this->disconnect();
+            $this->worker->replay($this->socket);
+            $this->connectAndHello();
+            $this->sendOpen();
+        }
+    }
+
+    /**
+     * 在当前连接上发送 ConsumeOpen 并安装 ConsumeReady。
+     */
+    private function sendOpen(): void
     {
         $open = $this->protocol->open(
             $this->cluster,

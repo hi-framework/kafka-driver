@@ -173,10 +173,36 @@ final class CoroutineConsumerStreamTest extends TestCase
 final class FakeConsumerWorker implements ConsumerWorkerInterface
 {
     public int $ensureCalls = 0;
+    public int $replayCalls = 0;
+    /** @var array<string,array<string,string>> */
+    public array $clusters = [];
+    /** @var array<string,string> */
+    public array $tokens = [];
 
     public function ensure(string $socket): void
     {
         ++$this->ensureCalls;
+    }
+
+    public function replay(string $socket): void
+    {
+        ++$this->replayCalls;
+    }
+
+    public function rememberCluster(string $socket, string $cluster, array $config): void
+    {
+        $this->clusters[$cluster] = $config;
+    }
+
+    public function rememberOAuthToken(
+        string $socket,
+        string $cluster,
+        string $token,
+        int $lifetimeMs,
+        string $principalName,
+        array $extensions,
+    ): void {
+        $this->tokens[$cluster] = $token;
     }
 }
 
@@ -262,6 +288,10 @@ final class FakeConsumerProtocol implements ConsumerProtocolInterface
     public function helloFrame(): string
     {
         return 'HELLO';
+    }
+    public function rpcHelloFrame(): string
+    {
+        return 'RPC_HELLO';
     }
     public function verifyHello(string $frame): void
     {

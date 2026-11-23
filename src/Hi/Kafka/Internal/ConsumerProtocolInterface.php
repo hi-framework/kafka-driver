@@ -20,9 +20,14 @@ interface ConsumerProtocolInterface
     public function errorFrameKind(): int;
 
     /**
-     * 编码连接建立后必须首先发送的 HELLO 帧。
+     * 编码 Consumer stream 连接建立后必须首先发送的 HELLO 帧。
      */
     public function helloFrame(): string;
+
+    /**
+     * 编码普通 RPC 连接建立后必须首先发送的 HELLO 帧。
+     */
+    public function rpcHelloFrame(): string;
 
     /**
      * 校验 worker 的 HELLO 响应及 protocol major 兼容性。

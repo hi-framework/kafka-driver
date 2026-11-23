@@ -34,6 +34,14 @@ final class ExtensionConsumerProtocol implements ConsumerProtocolInterface
     }
 
     /**
+     * 通过扩展编码 RPC 角色的 HELLO 帧。
+     */
+    public function rpcHelloFrame(): string
+    {
+        return \hi_kafka_encode_hello_frame(0);
+    }
+
+    /**
      * 通过扩展校验 HELLO 响应和协议版本。
      */
     public function verifyHello(string $frame): void
