@@ -30,9 +30,12 @@ if (! \interface_exists(ClientInterface::class, false)) {
          *
          * worker 可同步识别的错误仍会抛出；方法成功只表示 worker 已接收请求。
          *
+         * `$key` 为 null 时由 partitioner 分配分区；`$value` 为 null 即 tombstone
+         * （compacted topic 的删除标记）。
+         *
          * @param array<string,string>|null $headers Kafka 消息头
          */
-        public function produceFnf(string $cluster, string $topic, string $key, string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null): void;
+        public function produceFnf(string $cluster, string $topic, ?string $key, ?string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null): void;
 
         /**
          * 生产一条消息并等待 broker delivery report。
@@ -41,7 +44,7 @@ if (! \interface_exists(ClientInterface::class, false)) {
          *
          * @return array<string,mixed> broker 确认结果，包含 partition、offset 或错误信息
          */
-        public function produceSync(string $cluster, string $topic, string $key, string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null, ?int $timeoutMs = null): array;
+        public function produceSync(string $cluster, string $topic, ?string $key, ?string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null, ?int $timeoutMs = null): array;
 
         /**
          * 创建独占连接的单消息 Consumer stream。

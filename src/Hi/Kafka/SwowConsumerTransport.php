@@ -23,6 +23,8 @@ final class SwowConsumerTransport implements ConsumerTransportInterface
     public function connect(string $socket, int $timeoutMs): void
     {
         $this->close();
+        // 协程 socket 取不到对端凭据：连接前确认 socket 属于本用户或 root。
+        \hi_kafka_check_socket_owner($socket);
 
         try {
             $connection = new Socket(Socket::TYPE_UNIX);

@@ -12,6 +12,9 @@ if (! \function_exists('hi_kafka_version')) {
     function hi_kafka_ensure_worker(?string $socket = null): void
     {
     }
+    function hi_kafka_check_socket_owner(string $socket): void
+    {
+    }
     /**
      * @param array<string,string> $config
      */

@@ -79,8 +79,8 @@ abstract class AbstractCoroutineClient implements ClientInterface
     public function produceFnf(
         string $cluster,
         string $topic,
-        string $key,
-        string $value,
+        ?string $key,
+        ?string $value,
         ?array $headers = null,
         ?int $partition = null,
         ?int $timestampMs = null,
@@ -106,8 +106,8 @@ abstract class AbstractCoroutineClient implements ClientInterface
     public function produceSync(
         string $cluster,
         string $topic,
-        string $key,
-        string $value,
+        ?string $key,
+        ?string $value,
         ?array $headers = null,
         ?int $partition = null,
         ?int $timestampMs = null,

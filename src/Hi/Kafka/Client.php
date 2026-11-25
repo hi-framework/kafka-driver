@@ -47,7 +47,7 @@ if (! \class_exists(Client::class, false)) {
         /**
          * 保留真实扩展的即发即弃生产方法签名；因构造必然失败，不会进入此实现。
          */
-        public function produceFnf(string $cluster, string $topic, string $key, string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null): void
+        public function produceFnf(string $cluster, string $topic, ?string $key, ?string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null): void
         {
         }
 
@@ -56,7 +56,7 @@ if (! \class_exists(Client::class, false)) {
          *
          * @return array<string,mixed>
          */
-        public function produceSync(string $cluster, string $topic, string $key, string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null, ?int $timeoutMs = null): array
+        public function produceSync(string $cluster, string $topic, ?string $key, ?string $value, ?array $headers = null, ?int $partition = null, ?int $timestampMs = null, ?int $timeoutMs = null): array
         {
             return [];
         }
